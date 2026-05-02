@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  name          String
+  email         String         @unique
+  password      String
+  role          Role           @default(MEMBER)
+  phone         String?
+  address       String?
+  avatarUrl     String?
+  createdAt     DateTime       @default(now())
+
+  tasks         Task[]
+  notifications Notification[]
+}
+
+model Client {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  createdAt DateTime  @default(now())
+
+  invoices  Invoice[]
+  leads     Lead[]
+}
+
+model Invoice {
+  id        Int           @id @default(autoincrement())
+  clientId  Int
+  amount    Float
+  status    InvoiceStatus @default(UNPAID)
+  dueDate   DateTime
+  issuedAt  DateTime      @default(now())
+  paidAt    DateTime?
+
+  client    Client        @relation(fields: [clientId], references: [id])
+}
+
+model Lead {
+  id          Int        @id @default(autoincrement())
+  clientId    Int?
+  name        String
+  phone       String?
+  source      String?
+  service     String?
+  status      LeadStatus @default(NEW)
+  followUpAt  DateTime?
+  notes       String?
+  createdAt   DateTime   @default(now())
+
+  client      Client?    @relation(fields: [clientId], references: [id])
+}
+
+model Task {
+  id          Int        @id @default(autoincrement())
+  title       String
+  description String?
+  assignedTo  Int
+  priority    Priority   @default(MEDIUM)
+  status      TaskStatus @default(TODO)
+  deadline    DateTime?
+  createdAt   DateTime   @default(now())
+
+  user        User       @relation(fields: [assignedTo], references: [id])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum InvoiceStatus {
+  PAID
+  UNPAID
+  OVERDUE
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  FOLLOW_UP
+  CONVERTED
+  LOST
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
