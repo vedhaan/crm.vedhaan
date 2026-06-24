@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import Sidebar from '../../components/Sidebar'
 import PageWrapper from '../../components/PageWrapper'
@@ -19,6 +19,23 @@ const STATUS_COLORS = {
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH']
 const STATUSES = ['TODO', 'IN_PROGRESS', 'DONE']
 
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+const getFileIcon = (mimeType) => {
+  if (!mimeType) return '📄'
+  if (mimeType.startsWith('image/')) return '🖼️'
+  if (mimeType === 'application/pdf') return '📕'
+  if (mimeType.includes('word')) return '📝'
+  if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊'
+  if (mimeType.includes('zip') || mimeType.includes('rar')) return '🗜️'
+  if (mimeType.startsWith('video/')) return '🎬'
+  return '📄'
+}
+
 const Tasks = () => {
   const { user } = useAuth()
   const [tasks, setTasks] = useState([])
@@ -30,9 +47,19 @@ const Tasks = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [filterStatus, setFilterStatus] = useState('ALL')
+  const [modalTab, setModalTab] = useState('details') // 'details' | 'files'
   const [form, setForm] = useState({
     title: '', description: '', assignedTo: '', priority: 'MEDIUM', deadline: '', status: 'TODO'
   })
+
+  // File upload state
+  const [taskFiles, setTaskFiles] = useState([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [uploadingFiles, setUploadingFiles] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [deletingFileId, setDeletingFileId] = useState(null)
+  const [uploadError, setUploadError] = useState('')
+  const fileInputRef = useRef(null)
 
   const fetchAll = async () => {
     try {
@@ -51,10 +78,25 @@ const Tasks = () => {
 
   useEffect(() => { fetchAll() }, [])
 
+  const fetchTaskFiles = async (taskId) => {
+    setFilesLoading(true)
+    try {
+      const res = await API.get(`/tasks/${taskId}/files`)
+      setTaskFiles(res.data)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setFilesLoading(false)
+    }
+  }
+
   const openAdd = () => {
     setEditTask(null)
     setForm({ title: '', description: '', assignedTo: '', priority: 'MEDIUM', deadline: '', status: 'TODO' })
     setError('')
+    setModalTab('details')
+    setTaskFiles([])
+    setUploadError('')
     setShowModal(true)
   }
 
@@ -69,13 +111,20 @@ const Tasks = () => {
       status: task.status
     })
     setError('')
+    setModalTab('details')
+    setTaskFiles([])
+    setUploadError('')
     setShowModal(true)
+    fetchTaskFiles(task.id)
   }
 
   const closeModal = () => {
     setShowModal(false)
     setEditTask(null)
     setError('')
+    setTaskFiles([])
+    setUploadError('')
+    setDragOver(false)
   }
 
   const handleChange = (e) => {
@@ -117,6 +166,58 @@ const Tasks = () => {
       setDeleteId(null)
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  const handleFileUpload = async (files) => {
+    if (!files || files.length === 0) return
+    if (!editTask) return
+
+    setUploadError('')
+    setUploadingFiles(true)
+
+    const formData = new FormData()
+    Array.from(files).forEach(file => formData.append('files', file))
+
+    try {
+      await API.post(`/tasks/${editTask.id}/files`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      await fetchTaskFiles(editTask.id)
+    } catch (err) {
+      setUploadError(err.response?.data?.message || 'Upload failed')
+    } finally {
+      setUploadingFiles(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    handleFileUpload(e.dataTransfer.files)
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    setDragOver(true)
+  }
+
+  const handleDragLeave = () => setDragOver(false)
+
+  const handleFileInputChange = (e) => {
+    handleFileUpload(e.target.files)
+  }
+
+  const handleFileDelete = async (fileId) => {
+    setDeletingFileId(fileId)
+    try {
+      await API.delete(`/files/${fileId}`)
+      setTaskFiles(prev => prev.filter(f => f.id !== fileId))
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setDeletingFileId(null)
     }
   }
 
@@ -173,21 +274,64 @@ const Tasks = () => {
         .btn-del:hover{background:#fde0e0}
         .empty{padding:60px 20px;text-align:center;color:#bbb;font-size:14px}
         .loading{padding:60px 20px;text-align:center;color:#bbb;font-size:14px}
+
+        /* Modal */
         .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
-        .modal{background:#fff;border-radius:16px;padding:36px;width:100%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,0.15);max-height:90vh;overflow-y:auto}
-        .modal-title{font-family:'Sora',sans-serif;font-size:18px;font-weight:700;color:#1a1a1a;margin-bottom:24px}
+        .modal{background:#fff;border-radius:16px;width:100%;max-width:520px;box-shadow:0 20px 60px rgba(0,0,0,0.15);max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+        .modal-header{padding:28px 32px 0}
+        .modal-title{font-family:'Sora',sans-serif;font-size:18px;font-weight:700;color:#1a1a1a}
+
+        /* Tabs */
+        .modal-tabs{display:flex;gap:0;margin-top:20px;border-bottom:1px solid #f0f0f0}
+        .modal-tab{padding:10px 20px;font-size:13px;font-weight:600;color:#aaa;cursor:pointer;border:none;background:none;font-family:'DM Sans',sans-serif;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all 0.15s}
+        .modal-tab.active{color:#b14b90;border-bottom-color:#b14b90}
+        .modal-tab-badge{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#f0f0f0;color:#888;font-size:10px;font-weight:700;margin-left:6px}
+        .modal-tab.active .modal-tab-badge{background:#f8e8f4;color:#b14b90}
+
+        /* Modal body */
+        .modal-body{padding:24px 32px;overflow-y:auto;flex:1}
         .field{margin-bottom:16px}
         .field label{display:block;font-size:11px;font-weight:600;color:#888;letter-spacing:0.4px;margin-bottom:6px;text-transform:uppercase}
         .field input,.field select,.field textarea{width:100%;padding:10px 14px;border:1px solid #e0e0e0;border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;color:#1a1a1a;outline:none;transition:border 0.2s;background:#fafafa}
         .field input:focus,.field select:focus,.field textarea:focus{border-color:#b14b90;background:#fff}
         .field textarea{resize:vertical;min-height:80px}
         .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-        .modal-actions{display:flex;gap:10px;margin-top:24px}
+        .modal-actions{padding:16px 32px 24px;display:flex;gap:10px;border-top:1px solid #f7f7f7}
         .btn-cancel{flex:1;padding:11px;background:#f5f5f5;border:none;border-radius:8px;font-size:14px;font-weight:500;color:#555;cursor:pointer;font-family:'DM Sans',sans-serif}
         .btn-save{flex:2;padding:11px;background:linear-gradient(135deg,#b14b90,#ea5580);border:none;border-radius:8px;font-size:14px;font-weight:600;color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;transition:opacity 0.2s}
         .btn-save:hover{opacity:0.88}
         .btn-save:disabled{opacity:0.6;cursor:not-allowed}
         .modal-error{background:#fff0f0;border:1px solid #ffd0d0;color:#c0392b;font-size:13px;padding:10px 14px;border-radius:8px;margin-bottom:16px}
+
+        /* File upload */
+        .drop-zone{border:2px dashed #e0e0e0;border-radius:12px;padding:32px 20px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fafafa;margin-bottom:16px}
+        .drop-zone:hover{border-color:#b14b90;background:#fdf5fb}
+        .drop-zone.drag-active{border-color:#b14b90;background:#fdf5fb;transform:scale(1.01)}
+        .drop-icon{font-size:28px;margin-bottom:8px}
+        .drop-text{font-size:13px;color:#888;line-height:1.5}
+        .drop-text strong{color:#b14b90;cursor:pointer}
+        .drop-hint{font-size:11px;color:#bbb;margin-top:4px}
+        .uploading-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#fdf5fb;border-radius:8px;margin-bottom:16px;font-size:13px;color:#b14b90;font-weight:500}
+        .spinner{width:16px;height:16px;border:2px solid #f0d0e8;border-top-color:#b14b90;border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .upload-error{background:#fff0f0;border:1px solid #ffd0d0;color:#c0392b;font-size:13px;padding:10px 14px;border-radius:8px;margin-bottom:12px}
+        .files-loading{padding:32px;text-align:center;color:#bbb;font-size:13px}
+        .file-list{display:flex;flex-direction:column;gap:8px}
+        .file-item{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#fafafa;border:1px solid #f0f0f0;border-radius:8px;transition:background 0.15s}
+        .file-item:hover{background:#f5f5f5}
+        .file-icon{font-size:20px;flex-shrink:0}
+        .file-info{flex:1;min-width:0}
+        .file-name{font-size:13px;font-weight:500;color:#1a1a1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .file-meta{font-size:11px;color:#aaa;margin-top:2px}
+        .file-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+        .btn-download{padding:5px 12px;background:#f0f4ff;border:none;border-radius:6px;font-size:11px;font-weight:600;color:#3b5bdb;cursor:pointer;font-family:'DM Sans',sans-serif;text-decoration:none;display:inline-flex;align-items:center}
+        .btn-file-del{padding:5px 10px;background:#fff0f0;border:none;border-radius:6px;font-size:11px;font-weight:600;color:#d45b64;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background 0.15s}
+        .btn-file-del:hover{background:#fde0e0}
+        .btn-file-del:disabled{opacity:0.5;cursor:not-allowed}
+        .no-files{padding:32px;text-align:center;color:#bbb;font-size:13px}
+        .files-new-task-note{padding:40px 20px;text-align:center;color:#bbb;font-size:13px;line-height:1.6}
+
+        /* Confirm */
         .confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px}
         .confirm-box{background:#fff;border-radius:12px;padding:28px;width:100%;max-width:360px}
         .confirm-title{font-family:'Sora',sans-serif;font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:8px}
@@ -321,55 +465,167 @@ const Tasks = () => {
       {showModal && (
         <div className='overlay' onClick={closeModal}>
           <div className='modal' onClick={e => e.stopPropagation()}>
-            <h2 className='modal-title'>{editTask ? 'Edit Task' : 'New Task'}</h2>
-            {error && <div className='modal-error'>{error}</div>}
-            <form onSubmit={handleSubmit}>
-              <div className='field'>
-                <label>Task Title *</label>
-                <input name='title' value={form.title} onChange={handleChange} placeholder='e.g. Design homepage for client' required />
-              </div>
-              <div className='field'>
-                <label>Description</label>
-                <textarea name='description' value={form.description} onChange={handleChange} placeholder='Any details about this task...' />
-              </div>
-              {user?.role === 'ADMIN' && (
-                <div className='field'>
-                  <label>Assign To *</label>
-                  <select name='assignedTo' value={form.assignedTo} onChange={handleChange} required>
-                    <option value=''>Select team member</option>
-                    {users.map(u => (
-                      <option key={u.id} value={u.id}>{u.name} — {u.role}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <div className='field-row'>
-                <div className='field'>
-                  <label>Priority</label>
-                  <select name='priority' value={form.priority} onChange={handleChange}>
-                    {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
-                <div className='field'>
-                  <label>Deadline</label>
-                  <input name='deadline' type='date' value={form.deadline} onChange={handleChange} />
-                </div>
-              </div>
-              {editTask && (
-                <div className='field'>
-                  <label>Status</label>
-                  <select name='status' value={form.status} onChange={handleChange}>
-                    {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-                  </select>
-                </div>
-              )}
-              <div className='modal-actions'>
-                <button type='button' className='btn-cancel' onClick={closeModal}>Cancel</button>
-                <button type='submit' className='btn-save' disabled={saving}>
-                  {saving ? 'Saving...' : editTask ? 'Update Task' : 'Create Task'}
+            <div className='modal-header'>
+              <h2 className='modal-title'>{editTask ? 'Edit Task' : 'New Task'}</h2>
+              <div className='modal-tabs'>
+                <button
+                  className={`modal-tab ${modalTab === 'details' ? 'active' : ''}`}
+                  onClick={() => setModalTab('details')}
+                >
+                  Details
+                </button>
+                <button
+                  className={`modal-tab ${modalTab === 'files' ? 'active' : ''}`}
+                  onClick={() => setModalTab('files')}
+                >
+                  Files
+                  <span className='modal-tab-badge'>{taskFiles.length}</span>
                 </button>
               </div>
-            </form>
+            </div>
+
+            {/* Details Tab */}
+            {modalTab === 'details' && (
+              <>
+                <div className='modal-body'>
+                  {error && <div className='modal-error'>{error}</div>}
+                  <form id='task-form' onSubmit={handleSubmit}>
+                    <div className='field'>
+                      <label>Task Title *</label>
+                      <input name='title' value={form.title} onChange={handleChange} placeholder='e.g. Design homepage for client' required />
+                    </div>
+                    <div className='field'>
+                      <label>Description</label>
+                      <textarea name='description' value={form.description} onChange={handleChange} placeholder='Any details about this task...' />
+                    </div>
+                    {user?.role === 'ADMIN' && (
+                      <div className='field'>
+                        <label>Assign To *</label>
+                        <select name='assignedTo' value={form.assignedTo} onChange={handleChange} required>
+                          <option value=''>Select team member</option>
+                          {users.map(u => (
+                            <option key={u.id} value={u.id}>{u.name} — {u.role}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div className='field-row'>
+                      <div className='field'>
+                        <label>Priority</label>
+                        <select name='priority' value={form.priority} onChange={handleChange}>
+                          {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </div>
+                      <div className='field'>
+                        <label>Deadline</label>
+                        <input name='deadline' type='date' value={form.deadline} onChange={handleChange} />
+                      </div>
+                    </div>
+                    {editTask && (
+                      <div className='field'>
+                        <label>Status</label>
+                        <select name='status' value={form.status} onChange={handleChange}>
+                          {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </form>
+                </div>
+                <div className='modal-actions'>
+                  <button type='button' className='btn-cancel' onClick={closeModal}>Cancel</button>
+                  <button type='submit' form='task-form' className='btn-save' disabled={saving}>
+                    {saving ? 'Saving...' : editTask ? 'Update Task' : 'Create Task'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Files Tab */}
+            {modalTab === 'files' && (
+              <>
+                <div className='modal-body'>
+                  {!editTask ? (
+                    <div className='files-new-task-note'>
+                      Save the task first before attaching files.
+                    </div>
+                  ) : (
+                    <>
+                      {uploadError && <div className='upload-error'>{uploadError}</div>}
+
+                      {uploadingFiles && (
+                        <div className='uploading-bar'>
+                          <div className='spinner'></div>
+                          Uploading files...
+                        </div>
+                      )}
+
+                      <div
+                        className={`drop-zone ${dragOver ? 'drag-active' : ''}`}
+                        onDrop={handleDrop}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <div className='drop-icon'>📎</div>
+                        <div className='drop-text'>
+                          Drop files here or <strong>click to browse</strong>
+                        </div>
+                        <div className='drop-hint'>Max 50MB per file · Any file type</div>
+                        <input
+                          ref={fileInputRef}
+                          type='file'
+                          multiple
+                          style={{ display: 'none' }}
+                          onChange={handleFileInputChange}
+                        />
+                      </div>
+
+                      {filesLoading ? (
+                        <div className='files-loading'>Loading files...</div>
+                      ) : taskFiles.length === 0 ? (
+                        <div className='no-files'>No files attached yet.</div>
+                      ) : (
+                        <div className='file-list'>
+                          {taskFiles.map(file => (
+                            <div key={file.id} className='file-item'>
+                              <span className='file-icon'>{getFileIcon(file.mimeType)}</span>
+                              <div className='file-info'>
+                                <div className='file-name'>{file.fileName}</div>
+                                <div className='file-meta'>
+                                  {formatBytes(file.fileSize)} · {file.uploader?.name} · {new Date(file.uploadedAt).toLocaleDateString('en-IN')}
+                                </div>
+                              </div>
+                              <div className='file-actions'>
+                                <a
+                                  href={file.downloadUrl}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='btn-download'
+                                >
+                                  ↓ Download
+                                </a>
+                                {(user?.role === 'ADMIN' || file.uploadedBy === user?.id) && (
+                                  <button
+                                    className='btn-file-del'
+                                    onClick={() => handleFileDelete(file.id)}
+                                    disabled={deletingFileId === file.id}
+                                  >
+                                    {deletingFileId === file.id ? '...' : 'Delete'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className='modal-actions'>
+                  <button type='button' className='btn-cancel' onClick={closeModal}>Close</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
