@@ -13,10 +13,135 @@ const S = {
   DONE:        { bg:'#F0FDF4', color:'#16A34A', border:'#BBF7D0', icon:'fa-circle-check',       label:'Done'        },
 }
 const STATUSES = ['TODO','IN_PROGRESS','DONE']
-const TABS = ['dashboard','tasks','notifications','profile']
+
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+const getFileIcon = (mimeType) => {
+  if (!mimeType) return '📄'
+  if (mimeType.startsWith('image/')) return '🖼️'
+  if (mimeType === 'application/pdf') return '📕'
+  if (mimeType.includes('word')) return '📝'
+  if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊'
+  if (mimeType.includes('zip') || mimeType.includes('rar')) return '🗜️'
+  if (mimeType.startsWith('video/')) return '🎬'
+  return '📄'
+}
+
+// Per-task file panel component
+function TaskFilePanel({ taskId, userId }) {
+  const [files, setFiles] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
+  const [error, setError] = useState('')
+  const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    fetchFiles()
+  }, [taskId])
+
+  const fetchFiles = async () => {
+    setLoading(true)
+    try {
+      const res = await API.get(`/tasks/${taskId}/files`)
+      setFiles(res.data)
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
+  }
+
+  const handleUpload = async (fileList) => {
+    if (!fileList || fileList.length === 0) return
+    setError('')
+    setUploading(true)
+    const formData = new FormData()
+    Array.from(fileList).forEach(f => formData.append('files', f))
+    try {
+      await API.post(`/tasks/${taskId}/files`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      await fetchFiles()
+    } catch (err) {
+      setError(err.response?.data?.message || 'Upload failed')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleDelete = async (fileId) => {
+    setDeletingId(fileId)
+    try {
+      await API.delete(`/files/${fileId}`)
+      setFiles(prev => prev.filter(f => f.id !== fileId))
+    } catch (e) { console.error(e) }
+    finally { setDeletingId(null) }
+  }
+
+  return (
+    <div className='file-panel'>
+      {error && <div className='file-panel-error'>{error}</div>}
+
+      {uploading && (
+        <div className='file-uploading'>
+          <div className='mini-spinner'/>
+          Uploading...
+        </div>
+      )}
+
+      <div
+        className={`file-drop ${dragOver ? 'drag-active' : ''}`}
+        onDrop={e => { e.preventDefault(); setDragOver(false); handleUpload(e.dataTransfer.files) }}
+        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <i className='fa-solid fa-cloud-arrow-up' style={{fontSize:'16px',color:'#b14b90',marginBottom:'4px'}}/>
+        <span>Drop files or <strong>browse</strong></span>
+        <input ref={fileInputRef} type='file' multiple style={{display:'none'}} onChange={e => handleUpload(e.target.files)} />
+      </div>
+
+      {loading ? (
+        <div className='file-panel-loading'>Loading files...</div>
+      ) : files.length === 0 ? (
+        <div className='file-panel-empty'>No files attached yet.</div>
+      ) : (
+        <div className='file-list'>
+          {files.map(file => (
+            <div key={file.id} className='file-row'>
+              <span className='file-row-icon'>{getFileIcon(file.mimeType)}</span>
+              <div className='file-row-info'>
+                <div className='file-row-name'>{file.fileName}</div>
+                <div className='file-row-meta'>{formatBytes(file.fileSize)}</div>
+              </div>
+              <div className='file-row-actions'>
+                <a href={file.downloadUrl} target='_blank' rel='noopener noreferrer' className='file-dl-btn'>
+                  <i className='fa-solid fa-download' style={{fontSize:'9px'}}/>
+                </a>
+                {(file.uploadedBy === userId) && (
+                  <button
+                    className='file-del-btn'
+                    onClick={() => handleDelete(file.id)}
+                    disabled={deletingId === file.id}
+                  >
+                    <i className='fa-solid fa-trash' style={{fontSize:'9px'}}/>
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function MemberDashboard() {
-  const { user, logout, login } = useAuth()
+  const { user, logout } = useAuth()
   const [tasks, setTasks]               = useState([])
   const [notifications, setNotifs]      = useState([])
   const [profile, setProfile]           = useState(null)
@@ -30,6 +155,7 @@ export default function MemberDashboard() {
   const [pwSaving, setPwSaving]         = useState(false)
   const [profileMsg, setProfileMsg]     = useState(null)
   const [pwMsg, setPwMsg]               = useState(null)
+  const [openFilePanels, setOpenFilePanels] = useState({}) // taskId -> bool
   const fileRef = useRef()
 
   const fetchAll = async () => {
@@ -112,6 +238,10 @@ export default function MemberDashboard() {
     setProfileForm(f => ({ ...f, avatarUrl: e.target.value }))
   }
 
+  const toggleFilePanel = (taskId) => {
+    setOpenFilePanels(prev => ({ ...prev, [taskId]: !prev[taskId] }))
+  }
+
   const counts = STATUSES.reduce((a,s)=>({...a,[s]:tasks.filter(t=>t.status===s).length}),{})
   const pct    = tasks.length ? Math.round((counts.DONE/tasks.length)*100) : 0
   const filtered = filter==='ALL' ? tasks : tasks.filter(t=>t.status===filter)
@@ -156,80 +286,31 @@ export default function MemberDashboard() {
       @keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(177,75,144,0)}50%{box-shadow:0 0 0 8px rgba(177,75,144,0.15)}}
       @keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
       @keyframes notifIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes panelOpen{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 
       .wrap{display:flex;min-height:100vh}
 
       /* RAIL */
-      .rail{
-        width:70px;background:#0D0D14;
-        display:flex;flex-direction:column;align-items:center;
-        padding:18px 0;flex-shrink:0;
-        position:sticky;top:0;height:100vh;
-      }
-      .rail-logo{
-        width:38px;height:38px;border-radius:11px;
-        background:linear-gradient(135deg,#b14b90,#ea5580);
-        display:flex;align-items:center;justify-content:center;
-        font-family:'Plus Jakarta Sans',sans-serif;
-        font-size:15px;font-weight:800;color:#fff;
-        margin-bottom:20px;animation:glow 3s ease infinite;
-        cursor:pointer;
-      }
-      .rail-btn{
-        width:42px;height:42px;border-radius:11px;
-        display:flex;align-items:center;justify-content:center;
-        color:rgba(255,255,255,0.25);font-size:15px;
-        transition:all 0.18s;cursor:pointer;
-        border:none;background:transparent;
-        margin-bottom:4px;position:relative;
-      }
+      .rail{width:70px;background:#0D0D14;display:flex;flex-direction:column;align-items:center;padding:18px 0;flex-shrink:0;position:sticky;top:0;height:100vh}
+      .rail-logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#b14b90,#ea5580);display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:800;color:#fff;margin-bottom:20px;animation:glow 3s ease infinite;cursor:pointer}
+      .rail-btn{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.25);font-size:15px;transition:all 0.18s;cursor:pointer;border:none;background:transparent;margin-bottom:4px;position:relative}
       .rail-btn:hover{background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.7)}
       .rail-btn.active{background:rgba(177,75,144,0.2);color:#ea5580}
-      .rail-btn .notif-dot{
-        position:absolute;top:8px;right:8px;
-        width:8px;height:8px;border-radius:50%;
-        background:#E11D48;border:2px solid #0D0D14;
-        animation:blink 2s ease infinite;
-      }
-      .rail-tooltip{
-        position:absolute;left:58px;
-        background:#1a1a2e;color:#fff;
-        font-size:11px;font-weight:600;
-        padding:5px 10px;border-radius:7px;
-        white-space:nowrap;pointer-events:none;
-        opacity:0;transition:opacity 0.15s;z-index:999;
-        font-family:'DM Sans',sans-serif;
-      }
+      .rail-btn .notif-dot{position:absolute;top:8px;right:8px;width:8px;height:8px;border-radius:50%;background:#E11D48;border:2px solid #0D0D14;animation:blink 2s ease infinite}
+      .rail-tooltip{position:absolute;left:58px;background:#1a1a2e;color:#fff;font-size:11px;font-weight:600;padding:5px 10px;border-radius:7px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:999;font-family:'DM Sans',sans-serif}
       .rail-btn:hover .rail-tooltip{opacity:1}
       .rail-sep{width:28px;height:1px;background:rgba(255,255,255,0.07);margin:8px 0}
       .rail-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:6px}
-      .rail-avatar{
-        width:34px;height:34px;border-radius:50%;
-        background:linear-gradient(135deg,#b14b90,#ea5580);
-        display:flex;align-items:center;justify-content:center;
-        font-size:11px;font-weight:700;color:#fff;
-        border:2px solid rgba(177,75,144,0.35);
-        overflow:hidden;cursor:pointer;
-      }
+      .rail-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#b14b90,#ea5580);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;border:2px solid rgba(177,75,144,0.35);overflow:hidden;cursor:pointer}
       .rail-avatar img{width:100%;height:100%;object-fit:cover}
-      .rail-logout{
-        width:34px;height:34px;border-radius:9px;
-        display:flex;align-items:center;justify-content:center;
-        color:rgba(255,255,255,0.2);font-size:12px;
-        background:transparent;border:none;cursor:pointer;
-        transition:all 0.18s;position:relative;
-      }
+      .rail-logout{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.2);font-size:12px;background:transparent;border:none;cursor:pointer;transition:all 0.18s;position:relative}
       .rail-logout:hover{background:rgba(229,72,77,0.15);color:#E11D48}
 
       /* MAIN */
       .main{flex:1;display:flex;flex-direction:column;min-width:0}
 
       /* TOPBAR */
-      .top{
-        height:62px;background:#fff;border-bottom:1px solid #EBEBEB;
-        display:flex;align-items:center;padding:0 32px;gap:14px;
-        position:sticky;top:0;z-index:50;
-      }
+      .top{height:62px;background:#fff;border-bottom:1px solid #EBEBEB;display:flex;align-items:center;padding:0 32px;gap:14px;position:sticky;top:0;z-index:50}
       .top-brand{font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:800;color:#111;letter-spacing:-0.4px}
       .top-brand b{color:#b14b90}
       .top-page{font-size:12px;color:#9CA3AF;background:#F4F4F4;padding:3px 10px;border-radius:999px;font-weight:500}
@@ -246,12 +327,7 @@ export default function MemberDashboard() {
       .content{padding:28px 32px;flex:1;animation:slideIn 0.3s ease both}
 
       /* HERO */
-      .hero{
-        background:#0D0D14;border-radius:18px;
-        padding:28px 32px;margin-bottom:20px;
-        display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center;
-        position:relative;overflow:hidden;
-      }
+      .hero{background:#0D0D14;border-radius:18px;padding:28px 32px;margin-bottom:20px;display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center;position:relative;overflow:hidden}
       .hero-blob1{position:absolute;right:-40px;top:-60px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(177,75,144,0.18) 0%,transparent 65%);pointer-events:none}
       .hero-blob2{position:absolute;left:40%;bottom:-80px;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(234,85,128,0.1) 0%,transparent 70%);pointer-events:none}
       .hero-eyebrow{font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:1.5px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px}
@@ -270,23 +346,10 @@ export default function MemberDashboard() {
       .hero-pct-lbl{font-size:8px;color:rgba(255,255,255,0.3);letter-spacing:0.8px;margin-top:1px}
       .hero-pct-sub{font-size:10px;color:rgba(255,255,255,0.25)}
 
-      /* PROFILE MINI CARD */
-      .profile-mini{
-        background:#fff;border-radius:14px;border:1px solid #EBEBEB;
-        padding:18px 20px;margin-bottom:20px;
-        display:flex;align-items:center;gap:16px;
-        animation:up 0.4s ease 0.1s both;
-        transition:box-shadow 0.18s;cursor:pointer;
-      }
+      /* PROFILE MINI */
+      .profile-mini{background:#fff;border-radius:14px;border:1px solid #EBEBEB;padding:18px 20px;margin-bottom:20px;display:flex;align-items:center;gap:16px;animation:up 0.4s ease 0.1s both;transition:box-shadow 0.18s;cursor:pointer}
       .profile-mini:hover{box-shadow:0 4px 16px rgba(0,0,0,0.07)}
-      .pm-avatar{
-        width:52px;height:52px;border-radius:14px;
-        background:linear-gradient(135deg,#b14b90,#ea5580);
-        display:flex;align-items:center;justify-content:center;
-        font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:800;color:#fff;
-        flex-shrink:0;overflow:hidden;
-        box-shadow:0 4px 12px rgba(177,75,144,0.3);
-      }
+      .pm-avatar{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#b14b90,#ea5580);display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:800;color:#fff;flex-shrink:0;overflow:hidden;box-shadow:0 4px 12px rgba(177,75,144,0.3)}
       .pm-avatar img{width:100%;height:100%;object-fit:cover}
       .pm-info{flex:1;min-width:0}
       .pm-name{font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:800;color:#111;margin-bottom:3px}
@@ -296,7 +359,7 @@ export default function MemberDashboard() {
       .pm-role-badge{font-size:10px;font-weight:700;letter-spacing:0.8px;background:#FDF4FB;color:#b14b90;border:1px solid #F0C9E8;padding:2px 9px;border-radius:999px}
       .pm-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0}
       .pm-joined{font-size:11px;color:#CBD5E1}
-      .pm-edit-btn{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#b14b90;background:#FDF4FB;border:1px solid #F0C9E8;padding:5px 12px;border-radius:8px;cursor:pointer;border-style:solid;font-family:'DM Sans',sans-serif;transition:all 0.15s}
+      .pm-edit-btn{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#b14b90;background:#FDF4FB;border:1px solid #F0C9E8;padding:5px 12px;border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all 0.15s}
       .pm-edit-btn:hover{background:#f5e0f0}
 
       /* PROGRESS */
@@ -317,7 +380,7 @@ export default function MemberDashboard() {
       .sc-val{font-family:'Plus Jakarta Sans',sans-serif;font-size:26px;font-weight:800;color:#111;line-height:1;margin-bottom:3px}
       .sc-label{font-size:11px;color:#9CA3AF;font-weight:500}
 
-      /* TASKS HEADER */
+      /* TASK SECTION HEADER */
       .th{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;animation:up 0.4s ease 0.35s both}
       .th-left{display:flex;align-items:center;gap:8px}
       .th-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:800;color:#111;letter-spacing:-0.3px}
@@ -352,7 +415,38 @@ export default function MemberDashboard() {
       .tc-updating{position:absolute;inset:0;background:rgba(255,255,255,0.8);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;border-radius:13px}
       .fa-spin2{animation:spin 0.7s linear infinite;color:#b14b90;font-size:20px}
 
-      /* NOTIFICATIONS TAB */
+      /* FILES TOGGLE */
+      .tc-files-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-top:1px solid #F3F4F6;cursor:pointer;transition:background 0.15s}
+      .tc-files-bar:hover{background:#FAFAFA}
+      .tc-files-toggle{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#6B7280}
+      .tc-files-toggle i{font-size:10px;color:#b14b90}
+      .tc-files-chevron{font-size:9px;color:#CBD5E1;transition:transform 0.2s}
+      .tc-files-chevron.open{transform:rotate(180deg)}
+
+      /* FILE PANEL */
+      .file-panel{padding:12px 16px 14px;background:#FAFAFA;border-top:1px solid #F0F0F0;animation:panelOpen 0.2s ease both}
+      .file-panel-error{background:#FFF1F2;color:#E11D48;border:1px solid #FECDD3;font-size:11px;padding:6px 10px;border-radius:6px;margin-bottom:8px}
+      .file-uploading{display:flex;align-items:center;gap:6px;font-size:11px;color:#b14b90;font-weight:600;margin-bottom:8px}
+      .mini-spinner{width:12px;height:12px;border:2px solid #F0C9E8;border-top-color:#b14b90;border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0}
+      .file-drop{border:1.5px dashed #E5E7EB;border-radius:8px;padding:10px;text-align:center;cursor:pointer;transition:all 0.18s;background:#fff;display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:10px;font-size:11px;color:#9CA3AF}
+      .file-drop strong{color:#b14b90}
+      .file-drop:hover,.file-drop.drag-active{border-color:#b14b90;background:#FDF5FB}
+      .file-panel-loading{font-size:11px;color:#CBD5E1;text-align:center;padding:8px 0}
+      .file-panel-empty{font-size:11px;color:#CBD5E1;text-align:center;padding:6px 0}
+      .file-list{display:flex;flex-direction:column;gap:5px}
+      .file-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:#fff;border:1px solid #F0F0F0;border-radius:7px}
+      .file-row-icon{font-size:15px;flex-shrink:0}
+      .file-row-info{flex:1;min-width:0}
+      .file-row-name{font-size:11px;font-weight:600;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .file-row-meta{font-size:10px;color:#CBD5E1;margin-top:1px}
+      .file-row-actions{display:flex;gap:4px;flex-shrink:0}
+      .file-dl-btn{width:24px;height:24px;border-radius:5px;background:#EFF6FF;display:inline-flex;align-items:center;justify-content:center;color:#2563EB;text-decoration:none;transition:background 0.15s}
+      .file-dl-btn:hover{background:#DBEAFE}
+      .file-del-btn{width:24px;height:24px;border-radius:5px;background:#FFF1F2;border:none;display:inline-flex;align-items:center;justify-content:center;color:#E11D48;cursor:pointer;transition:background 0.15s}
+      .file-del-btn:hover{background:#FECDD3}
+      .file-del-btn:disabled{opacity:0.4;cursor:not-allowed}
+
+      /* NOTIFICATIONS */
       .notif-wrap{animation:slideIn 0.3s ease both}
       .notif-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
       .notif-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:800;color:#111;display:flex;align-items:center;gap:8px}
@@ -360,18 +454,10 @@ export default function MemberDashboard() {
       .mark-all-btn{font-size:12px;font-weight:600;color:#b14b90;background:none;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;padding:6px 12px;border-radius:8px;transition:background 0.15s}
       .mark-all-btn:hover{background:#FDF4FB}
       .notif-list{display:flex;flex-direction:column;gap:8px}
-      .notif-item{
-        background:#fff;border-radius:12px;border:1px solid #EBEBEB;
-        padding:14px 16px;display:flex;align-items:flex-start;gap:12px;
-        transition:all 0.18s;animation:notifIn 0.3s ease var(--nd) both;
-        cursor:pointer;
-      }
+      .notif-item{background:#fff;border-radius:12px;border:1px solid #EBEBEB;padding:14px 16px;display:flex;align-items:flex-start;gap:12px;transition:all 0.18s;animation:notifIn 0.3s ease var(--nd) both;cursor:pointer}
       .notif-item:hover{border-color:#D1D5DB;box-shadow:0 4px 12px rgba(0,0,0,0.06)}
       .notif-item.unread{border-left:3px solid #b14b90;background:#FDF9FC}
-      .notif-ico{
-        width:36px;height:36px;border-radius:10px;flex-shrink:0;
-        display:flex;align-items:center;justify-content:center;font-size:14px;
-      }
+      .notif-ico{width:36px;height:36px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px}
       .notif-body{flex:1;min-width:0}
       .notif-ntitle{font-size:13px;font-weight:600;color:#111;margin-bottom:3px}
       .notif-msg{font-size:12px;color:#6B7280;line-height:1.55}
@@ -382,19 +468,12 @@ export default function MemberDashboard() {
       .notif-empty-t{font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;color:#111;margin-bottom:6px}
       .notif-empty-s{font-size:12px;color:#9CA3AF}
 
-      /* PROFILE TAB */
+      /* PROFILE */
       .profile-wrap{display:grid;grid-template-columns:1fr 1fr;gap:16px;animation:slideIn 0.3s ease both}
       .profile-card{background:#fff;border-radius:14px;border:1px solid #EBEBEB;padding:24px}
       .profile-card-title{font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:800;color:#111;margin-bottom:18px;display:flex;align-items:center;gap:8px}
       .profile-avatar-section{display:flex;flex-direction:column;align-items:center;margin-bottom:20px}
-      .profile-avatar-big{
-        width:80px;height:80px;border-radius:20px;
-        background:linear-gradient(135deg,#b14b90,#ea5580);
-        display:flex;align-items:center;justify-content:center;
-        font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;color:#fff;
-        margin-bottom:10px;box-shadow:0 6px 20px rgba(177,75,144,0.3);
-        overflow:hidden;
-      }
+      .profile-avatar-big{width:80px;height:80px;border-radius:20px;background:linear-gradient(135deg,#b14b90,#ea5580);display:flex;align-items:center;justify-content:center;font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;color:#fff;margin-bottom:10px;box-shadow:0 6px 20px rgba(177,75,144,0.3);overflow:hidden}
       .profile-avatar-big img{width:100%;height:100%;object-fit:cover}
       .profile-avatar-hint{font-size:11px;color:#9CA3AF;text-align:center}
       .pfield{margin-bottom:14px}
@@ -410,7 +489,7 @@ export default function MemberDashboard() {
       .msg-success{background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0}
       .msg-error{background:#FFF1F2;color:#E11D48;border:1px solid #FECDD3}
 
-      /* EMPTY/LOADING */
+      /* EMPTY / LOADING */
       .empty{background:#fff;border-radius:14px;border:1px solid #EBEBEB;padding:72px 24px;text-align:center}
       .empty-ico{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,#b14b90,#ea5580);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:26px;color:#fff;box-shadow:0 6px 20px rgba(177,75,144,0.3)}
       .empty-t{font-family:'Plus Jakarta Sans',sans-serif;font-size:17px;font-weight:800;color:#111;margin-bottom:7px}
@@ -427,36 +506,27 @@ export default function MemberDashboard() {
       {/* RAIL */}
       <div className='rail'>
         <div className='rail-logo'>V</div>
-
         <div className={`rail-btn ${activeTab==='dashboard'?'active':''}`} onClick={()=>setActiveTab('dashboard')}>
           <i className='fa-solid fa-house'/>
           <span className='rail-tooltip'>Dashboard</span>
         </div>
-
         <div className={`rail-btn ${activeTab==='tasks'?'active':''}`} onClick={()=>setActiveTab('tasks')}>
           <i className='fa-solid fa-list-check'/>
           <span className='rail-tooltip'>My Tasks</span>
         </div>
-
         <div className={`rail-btn ${activeTab==='notifications'?'active':''}`} onClick={()=>setActiveTab('notifications')}>
           <i className='fa-solid fa-bell'/>
           {unread > 0 && <span className='notif-dot'/>}
           <span className='rail-tooltip'>Notifications {unread>0?`(${unread})`:''}</span>
         </div>
-
         <div className='rail-sep'/>
-
         <div className={`rail-btn ${activeTab==='profile'?'active':''}`} onClick={()=>setActiveTab('profile')}>
           <i className='fa-solid fa-gear'/>
           <span className='rail-tooltip'>Profile & Settings</span>
         </div>
-
         <div className='rail-bottom'>
           <div className='rail-avatar' onClick={()=>setActiveTab('profile')}>
-            {profile?.avatarUrl
-              ? <img src={profile.avatarUrl} alt='avatar'/>
-              : initials(user?.name)
-            }
+            {profile?.avatarUrl ? <img src={profile.avatarUrl} alt='avatar'/> : initials(user?.name)}
           </div>
           <button className='rail-logout' title='Sign out' onClick={()=>{logout();window.location.href='/login'}}>
             <i className='fa-solid fa-right-from-bracket'/>
@@ -487,10 +557,10 @@ export default function MemberDashboard() {
         </div>
 
         <div className='content'>
-          {/* DASHBOARD TAB */}
+
+          {/* ── DASHBOARD TAB ── */}
           {activeTab==='dashboard' && (
             <>
-              {/* HERO */}
               <div className='hero' style={{animation:'up 0.4s ease 0.05s both'}}>
                 <div className='hero-blob1'/><div className='hero-blob2'/>
                 <div>
@@ -529,7 +599,6 @@ export default function MemberDashboard() {
                 </div>
               </div>
 
-              {/* MINI PROFILE CARD */}
               {profile && (
                 <div className='profile-mini' onClick={()=>setActiveTab('profile')}>
                   <div className='pm-avatar'>
@@ -545,15 +614,11 @@ export default function MemberDashboard() {
                   </div>
                   <div className='pm-right'>
                     <div className='pm-joined'>Joined {new Date(profile.createdAt).toLocaleDateString('en-IN',{month:'short',year:'numeric'})}</div>
-                    <button className='pm-edit-btn'>
-                      <i className='fa-solid fa-pen' style={{fontSize:'10px'}}/>
-                      Edit Profile
-                    </button>
+                    <button className='pm-edit-btn'><i className='fa-solid fa-pen' style={{fontSize:'10px'}}/>Edit Profile</button>
                   </div>
                 </div>
               )}
 
-              {/* PROGRESS */}
               <div className='prog-wrap'>
                 <div className='prog-row'>
                   <div className='prog-label'><i className='fa-solid fa-chart-line' style={{color:'#b14b90'}}/>OVERALL PROGRESS</div>
@@ -564,13 +629,12 @@ export default function MemberDashboard() {
                 </div>
               </div>
 
-              {/* STATS */}
               <div className='stats'>
                 {[
-                  {label:'Total',       val:tasks.length,          ico:'fa-layer-group',       ibg:'#F8FAFC',ic:'#64748B',d:'0.2s', badge:null},
-                  {label:'To Do',       val:counts.TODO||0,        ico:'fa-circle-dot',         ibg:'#EFF6FF',ic:'#2563EB',d:'0.25s',badge:null},
-                  {label:'In Progress', val:counts.IN_PROGRESS||0, ico:'fa-bolt',               ibg:'#FAF5FF',ic:'#7C3AED',d:'0.3s', badge:null},
-                  {label:'Completed',   val:counts.DONE||0,        ico:'fa-circle-check',       ibg:'#F0FDF4',ic:'#16A34A',d:'0.35s',badge:pct>0?`${pct}%`:null},
+                  {label:'Total',       val:tasks.length,          ico:'fa-layer-group',  ibg:'#F8FAFC',ic:'#64748B',d:'0.2s',  badge:null},
+                  {label:'To Do',       val:counts.TODO||0,        ico:'fa-circle-dot',   ibg:'#EFF6FF',ic:'#2563EB',d:'0.25s', badge:null},
+                  {label:'In Progress', val:counts.IN_PROGRESS||0, ico:'fa-bolt',         ibg:'#FAF5FF',ic:'#7C3AED',d:'0.3s',  badge:null},
+                  {label:'Completed',   val:counts.DONE||0,        ico:'fa-circle-check', ibg:'#F0FDF4',ic:'#16A34A',d:'0.35s', badge:pct>0?`${pct}%`:null},
                 ].map(s=>(
                   <div key={s.label} className='sc' style={{'--d':s.d}}>
                     <div className='sc-top'>
@@ -583,16 +647,14 @@ export default function MemberDashboard() {
                 ))}
               </div>
 
-              {/* RECENT TASKS PREVIEW */}
               <div className='th'>
                 <div className='th-left'>
                   <i className='fa-solid fa-thumbtack' style={{color:'#b14b90',fontSize:'13px'}}/>
                   <div className='th-title'>Recent Tasks</div>
                   <div className='th-count'>{tasks.slice(0,4).length}</div>
                 </div>
-                <button className='fp on' onClick={()=>setActiveTab('tasks')} style={{cursor:'pointer'}}>
-                  <i className='fa-solid fa-arrow-right' style={{fontSize:'9px'}}/>
-                  View All
+                <button className='fp on' onClick={()=>setActiveTab('tasks')}>
+                  <i className='fa-solid fa-arrow-right' style={{fontSize:'9px'}}/>View All
                 </button>
               </div>
 
@@ -633,7 +695,7 @@ export default function MemberDashboard() {
             </>
           )}
 
-          {/* TASKS TAB */}
+          {/* ── TASKS TAB ── */}
           {activeTab==='tasks' && (
             <div style={{animation:'slideIn 0.3s ease both'}}>
               <div className='th'>
@@ -675,6 +737,7 @@ export default function MemberDashboard() {
                   {filtered.map((task,i)=>{
                     const p=P[task.priority]; const st=S[task.status]; const dl=deadlineInfo(task.deadline,task.status)
                     const isUpdating=updating===task.id
+                    const filesOpen=openFilePanels[task.id]
                     return(
                       <div key={task.id} className={`tc ${task.status==='DONE'?'done-card':''}`} style={{'--cd':`${i*0.05}s`}}>
                         <div className='tc-stripe' style={{background:p.stripe}}/>
@@ -697,6 +760,20 @@ export default function MemberDashboard() {
                             </select>
                           </div>
                         </div>
+
+                        {/* Files toggle bar */}
+                        <div className='tc-files-bar' onClick={()=>toggleFilePanel(task.id)}>
+                          <div className='tc-files-toggle'>
+                            <i className='fa-solid fa-paperclip'/>
+                            Files
+                          </div>
+                          <i className={`fa-solid fa-chevron-down tc-files-chevron ${filesOpen?'open':''}`}/>
+                        </div>
+
+                        {/* File panel — mounts only when open, so fetch happens on first expand */}
+                        {filesOpen && (
+                          <TaskFilePanel taskId={task.id} userId={user?.id} />
+                        )}
                       </div>
                     )
                   })}
@@ -705,7 +782,7 @@ export default function MemberDashboard() {
             </div>
           )}
 
-          {/* NOTIFICATIONS TAB */}
+          {/* ── NOTIFICATIONS TAB ── */}
           {activeTab==='notifications' && (
             <div className='notif-wrap'>
               <div className='notif-header'>
@@ -715,11 +792,9 @@ export default function MemberDashboard() {
                   {unread>0&&<span className='notif-unread-badge'>{unread} new</span>}
                 </div>
                 {unread>0&&<button className='mark-all-btn' onClick={markAllRead}>
-                  <i className='fa-solid fa-check-double' style={{marginRight:'5px'}}/>
-                  Mark all read
+                  <i className='fa-solid fa-check-double' style={{marginRight:'5px'}}/>Mark all read
                 </button>}
               </div>
-
               {notifications.length===0 ? (
                 <div className='notif-empty'>
                   <div className='notif-empty-ico'><i className='fa-solid fa-bell-slash'/></div>
@@ -729,23 +804,18 @@ export default function MemberDashboard() {
               ) : (
                 <div className='notif-list'>
                   {notifications.map((n,i)=>{
-                    const isTask = n.title.includes('Task') || n.title.includes('Assigned')
-                    const isDeadline = n.title.includes('Due') || n.title.includes('Overdue')
-                    const ico = isDeadline ? 'fa-clock' : isTask ? 'fa-list-check' : 'fa-bell'
-                    const ibg = isDeadline ? '#FFF7ED' : isTask ? '#EFF6FF' : '#FDF4FB'
-                    const ic  = isDeadline ? '#D97706' : isTask ? '#2563EB' : '#b14b90'
+                    const isTask=n.title.includes('Task')||n.title.includes('Assigned')
+                    const isDeadline=n.title.includes('Due')||n.title.includes('Overdue')
+                    const ico=isDeadline?'fa-clock':isTask?'fa-list-check':'fa-bell'
+                    const ibg=isDeadline?'#FFF7ED':isTask?'#EFF6FF':'#FDF4FB'
+                    const ic=isDeadline?'#D97706':isTask?'#2563EB':'#b14b90'
                     return(
                       <div key={n.id} className={`notif-item ${!n.isRead?'unread':''}`} style={{'--nd':`${i*0.04}s`}} onClick={()=>!n.isRead&&markOneRead(n.id)}>
-                        <div className='notif-ico' style={{background:ibg}}>
-                          <i className={`fa-solid ${ico}`} style={{color:ic}}/>
-                        </div>
+                        <div className='notif-ico' style={{background:ibg}}><i className={`fa-solid ${ico}`} style={{color:ic}}/></div>
                         <div className='notif-body'>
                           <div className='notif-ntitle'>{n.title}</div>
                           <div className='notif-msg'>{n.message}</div>
-                          <div className='notif-time'>
-                            <i className='fa-regular fa-clock' style={{fontSize:'9px'}}/>
-                            {timeAgo(n.createdAt)}
-                          </div>
+                          <div className='notif-time'><i className='fa-regular fa-clock' style={{fontSize:'9px'}}/>{timeAgo(n.createdAt)}</div>
                         </div>
                         {!n.isRead&&<div className='notif-unread-dot'/>}
                       </div>
@@ -756,15 +826,11 @@ export default function MemberDashboard() {
             </div>
           )}
 
-          {/* PROFILE TAB */}
+          {/* ── PROFILE TAB ── */}
           {activeTab==='profile' && (
             <div className='profile-wrap'>
-              {/* EDIT PROFILE */}
               <div className='profile-card'>
-                <div className='profile-card-title'>
-                  <i className='fa-solid fa-user' style={{color:'#b14b90'}}/>
-                  Edit Profile
-                </div>
+                <div className='profile-card-title'><i className='fa-solid fa-user' style={{color:'#b14b90'}}/>Edit Profile</div>
                 <div className='profile-avatar-section'>
                   <div className='profile-avatar-big'>
                     {profileForm.avatarUrl ? <img src={profileForm.avatarUrl} alt=''/> : initials(profileForm.name)}
@@ -772,82 +838,46 @@ export default function MemberDashboard() {
                   <div className='profile-avatar-hint'>Paste an image URL below to set your avatar</div>
                 </div>
                 {profileMsg&&<div className={`msg-box ${profileMsg.type==='success'?'msg-success':'msg-error'}`}>
-                  <i className={`fa-solid ${profileMsg.type==='success'?'fa-circle-check':'fa-circle-xmark'}`}/>
-                  {profileMsg.text}
+                  <i className={`fa-solid ${profileMsg.type==='success'?'fa-circle-check':'fa-circle-xmark'}`}/>{profileMsg.text}
                 </div>}
                 <form onSubmit={saveProfile}>
-                  <div className='pfield'>
-                    <label>Full Name</label>
-                    <input value={profileForm.name} onChange={e=>setProfileForm(f=>({...f,name:e.target.value}))} placeholder='Your full name' required/>
-                  </div>
-                  <div className='pfield'>
-                    <label>Email</label>
-                    <input value={profile?.email||''} readOnly/>
-                  </div>
-                  <div className='pfield'>
-                    <label>Phone Number</label>
-                    <input value={profileForm.phone} onChange={e=>setProfileForm(f=>({...f,phone:e.target.value}))} placeholder='e.g. 9876543210'/>
-                  </div>
-                  <div className='pfield'>
-                    <label>Address</label>
-                    <textarea value={profileForm.address} onChange={e=>setProfileForm(f=>({...f,address:e.target.value}))} placeholder='Your address'/>
-                  </div>
-                  <div className='pfield'>
-                    <label>Avatar URL</label>
-                    <input value={profileForm.avatarUrl} onChange={handleAvatarUrl} placeholder='https://example.com/photo.jpg'/>
-                  </div>
+                  <div className='pfield'><label>Full Name</label><input value={profileForm.name} onChange={e=>setProfileForm(f=>({...f,name:e.target.value}))} placeholder='Your full name' required/></div>
+                  <div className='pfield'><label>Email</label><input value={profile?.email||''} readOnly/></div>
+                  <div className='pfield'><label>Phone Number</label><input value={profileForm.phone} onChange={e=>setProfileForm(f=>({...f,phone:e.target.value}))} placeholder='e.g. 9876543210'/></div>
+                  <div className='pfield'><label>Address</label><textarea value={profileForm.address} onChange={e=>setProfileForm(f=>({...f,address:e.target.value}))} placeholder='Your address'/></div>
+                  <div className='pfield'><label>Avatar URL</label><input value={profileForm.avatarUrl} onChange={handleAvatarUrl} placeholder='https://example.com/photo.jpg'/></div>
                   <button type='submit' className='save-btn' disabled={profileSaving}>
-                    <i className='fa-solid fa-floppy-disk'/>
-                    {profileSaving ? 'Saving...' : 'Save Profile'}
+                    <i className='fa-solid fa-floppy-disk'/>{profileSaving?'Saving...':'Save Profile'}
                   </button>
                 </form>
               </div>
 
-              {/* CHANGE PASSWORD */}
               <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
                 <div className='profile-card'>
-                  <div className='profile-card-title'>
-                    <i className='fa-solid fa-lock' style={{color:'#b14b90'}}/>
-                    Change Password
-                  </div>
+                  <div className='profile-card-title'><i className='fa-solid fa-lock' style={{color:'#b14b90'}}/>Change Password</div>
                   {pwMsg&&<div className={`msg-box ${pwMsg.type==='success'?'msg-success':'msg-error'}`}>
-                    <i className={`fa-solid ${pwMsg.type==='success'?'fa-circle-check':'fa-circle-xmark'}`}/>
-                    {pwMsg.text}
+                    <i className={`fa-solid ${pwMsg.type==='success'?'fa-circle-check':'fa-circle-xmark'}`}/>{pwMsg.text}
                   </div>}
                   <form onSubmit={savePassword}>
-                    <div className='pfield'>
-                      <label>Current Password</label>
-                      <input type='password' value={pwForm.currentPassword} onChange={e=>setPwForm(f=>({...f,currentPassword:e.target.value}))} placeholder='Current password' required/>
-                    </div>
-                    <div className='pfield'>
-                      <label>New Password</label>
-                      <input type='password' value={pwForm.newPassword} onChange={e=>setPwForm(f=>({...f,newPassword:e.target.value}))} placeholder='New password' required/>
-                    </div>
-                    <div className='pfield'>
-                      <label>Confirm New Password</label>
-                      <input type='password' value={pwForm.confirmPassword} onChange={e=>setPwForm(f=>({...f,confirmPassword:e.target.value}))} placeholder='Confirm new password' required/>
-                    </div>
+                    <div className='pfield'><label>Current Password</label><input type='password' value={pwForm.currentPassword} onChange={e=>setPwForm(f=>({...f,currentPassword:e.target.value}))} placeholder='Current password' required/></div>
+                    <div className='pfield'><label>New Password</label><input type='password' value={pwForm.newPassword} onChange={e=>setPwForm(f=>({...f,newPassword:e.target.value}))} placeholder='New password' required/></div>
+                    <div className='pfield'><label>Confirm New Password</label><input type='password' value={pwForm.confirmPassword} onChange={e=>setPwForm(f=>({...f,confirmPassword:e.target.value}))} placeholder='Confirm new password' required/></div>
                     <button type='submit' className='save-btn' disabled={pwSaving}>
-                      <i className='fa-solid fa-key'/>
-                      {pwSaving ? 'Changing...' : 'Change Password'}
+                      <i className='fa-solid fa-key'/>{pwSaving?'Changing...':'Change Password'}
                     </button>
                   </form>
                 </div>
 
-                {/* ACCOUNT INFO CARD */}
                 <div className='profile-card'>
-                  <div className='profile-card-title'>
-                    <i className='fa-solid fa-circle-info' style={{color:'#b14b90'}}/>
-                    Account Info
-                  </div>
+                  <div className='profile-card-title'><i className='fa-solid fa-circle-info' style={{color:'#b14b90'}}/>Account Info</div>
                   <div style={{display:'flex',flexDirection:'column',gap:'12px'}}>
                     {[
-                      {ico:'fa-user',     label:'Name',    val:profile?.name},
-                      {ico:'fa-envelope', label:'Email',   val:profile?.email},
-                      {ico:'fa-phone',    label:'Phone',   val:profile?.phone||'Not set'},
-                      {ico:'fa-location-dot', label:'Address', val:profile?.address||'Not set'},
-                      {ico:'fa-calendar', label:'Joined',  val:profile?new Date(profile.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}):''},
-                      {ico:'fa-shield',   label:'Role',    val:'Member'},
+                      {ico:'fa-user',label:'Name',val:profile?.name},
+                      {ico:'fa-envelope',label:'Email',val:profile?.email},
+                      {ico:'fa-phone',label:'Phone',val:profile?.phone||'Not set'},
+                      {ico:'fa-location-dot',label:'Address',val:profile?.address||'Not set'},
+                      {ico:'fa-calendar',label:'Joined',val:profile?new Date(profile.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}):''},
+                      {ico:'fa-shield',label:'Role',val:'Member'},
                     ].map(r=>(
                       <div key={r.label} style={{display:'flex',alignItems:'center',gap:'10px',padding:'8px 0',borderBottom:'1px solid #F3F4F6'}}>
                         <div style={{width:'28px',height:'28px',borderRadius:'7px',background:'#FDF4FB',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
@@ -864,6 +894,7 @@ export default function MemberDashboard() {
               </div>
             </div>
           )}
+
         </div>
       </div>
     </div>
