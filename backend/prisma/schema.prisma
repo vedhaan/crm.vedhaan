@@ -14,13 +14,14 @@ model User {
   email         String         @unique
   password      String
   role          Role           @default(MEMBER)
-  phone         String?
+  createdAt     DateTime       @default(now())
   address       String?
   avatarUrl     String?
-  createdAt     DateTime       @default(now())
-
-  tasks         Task[]
+  phone         String?
   notifications Notification[]
+  tasks         Task[]
+  workEntries WorkEntry[]
+  attendance  Attendance[]
 }
 
 model Client {
@@ -30,36 +31,33 @@ model Client {
   phone     String?
   company   String?
   createdAt DateTime  @default(now())
-
   invoices  Invoice[]
   leads     Lead[]
 }
 
 model Invoice {
-  id        Int           @id @default(autoincrement())
-  clientId  Int
-  amount    Float
-  status    InvoiceStatus @default(UNPAID)
-  dueDate   DateTime
-  issuedAt  DateTime      @default(now())
-  paidAt    DateTime?
-
-  client    Client        @relation(fields: [clientId], references: [id])
+  id       Int           @id @default(autoincrement())
+  clientId Int
+  amount   Float
+  status   InvoiceStatus @default(UNPAID)
+  dueDate  DateTime
+  issuedAt DateTime      @default(now())
+  paidAt   DateTime?
+  client   Client        @relation(fields: [clientId], references: [id])
 }
 
 model Lead {
-  id          Int        @id @default(autoincrement())
-  clientId    Int?
-  name        String
-  phone       String?
-  source      String?
-  service     String?
-  status      LeadStatus @default(NEW)
-  followUpAt  DateTime?
-  notes       String?
-  createdAt   DateTime   @default(now())
-
-  client      Client?    @relation(fields: [clientId], references: [id])
+  id         Int        @id @default(autoincrement())
+  clientId   Int?
+  name       String
+  phone      String?
+  source     String?
+  service    String?
+  status     LeadStatus @default(NEW)
+  followUpAt DateTime?
+  notes      String?
+  createdAt  DateTime   @default(now())
+  client     Client?    @relation(fields: [clientId], references: [id])
 }
 
 model Task {
@@ -71,7 +69,6 @@ model Task {
   status      TaskStatus @default(TODO)
   deadline    DateTime?
   createdAt   DateTime   @default(now())
-
   user        User       @relation(fields: [assignedTo], references: [id])
 }
 
@@ -82,7 +79,6 @@ model Notification {
   message   String
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
-
   user      User     @relation(fields: [userId], references: [id])
 }
 
@@ -115,4 +111,71 @@ enum TaskStatus {
   TODO
   IN_PROGRESS
   DONE
+}
+model WorkEntry {
+  id          Int        @id @default(autoincrement())
+  userId      Int
+  workDate    DateTime   @db.Date
+  title       String     @db.VarChar(300)
+  client      String?    @db.VarChar(150)
+  targetCount Int?
+  doneCount   Int        @default(0)
+  status      WorkStatus @default(PENDING)
+  remarks     String?    @db.VarChar(1000)
+  proof       String?    @db.Text
+  isLate      Boolean    @default(false)
+  position    Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  user        User       @relation(fields: [userId], references: [id])
+
+  @@index([userId, workDate])
+  @@index([workDate])
+}
+
+model Attendance {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  date      DateTime         @db.Date
+  status    AttendanceStatus
+  note      String?          @db.VarChar(300)
+  markedBy  Int
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user      User             @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+}
+
+model Holiday {
+  id   Int      @id @default(autoincrement())
+  date DateTime @unique @db.Date
+  name String   @db.VarChar(150)
+}
+
+model WorkEntryLog {
+  id        Int      @id @default(autoincrement())
+  actorId   Int
+  userId    Int
+  workDate  DateTime @db.Date
+  entryId   Int?
+  action    String   @db.VarChar(30)
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId, workDate])
+}
+
+enum WorkStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
 }

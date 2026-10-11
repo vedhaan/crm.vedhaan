@@ -8,6 +8,7 @@ import Invoices from './pages/admin/Invoices'
 import Leads from './pages/admin/Leads'
 import Tasks from './pages/admin/Tasks'
 import MemberDashboard from './pages/member/MemberDashboard'
+import Worksheet from './pages/admin/Worksheet'
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
           <Route path='/invoices' element={<ProtectedRoute adminOnly><Invoices /></ProtectedRoute>} />
           <Route path='/leads' element={<ProtectedRoute adminOnly><Leads /></ProtectedRoute>} />
           <Route path='/tasks' element={<ProtectedRoute adminOnly><Tasks /></ProtectedRoute>} />
+          <Route path='/worksheet' element={<ProtectedRoute adminOnly><Worksheet /></ProtectedRoute>} />
 
           {/* Member route */}
           <Route path='/member' element={<ProtectedRoute><MemberDashboard /></ProtectedRoute>} />

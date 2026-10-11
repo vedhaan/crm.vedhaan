@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import API from '../../api/axios'
+import WorksheetPanel from '../../components/worksheet/WorksheetPanel'
 
 const P = {
   LOW:    { bg:'#EFF6FF', color:'#2563EB', border:'#BFDBFE', stripe:'#2563EB', icon:'fa-arrow-down',    label:'Low'    },
@@ -23,7 +24,7 @@ export default function MemberDashboard() {
   const [loading, setLoading]           = useState(true)
   const [filter, setFilter]             = useState('ALL')
   const [updating, setUpdating]         = useState(null)
-  const [activeTab, setActiveTab]       = useState('dashboard')
+  const [activeTab, setActiveTab]       = useState('worksheet')
   const [profileForm, setProfileForm]   = useState({ name:'', phone:'', address:'', avatarUrl:'' })
   const [pwForm, setPwForm]             = useState({ currentPassword:'', newPassword:'', confirmPassword:'' })
   const [profileSaving, setProfileSaving] = useState(false)
@@ -35,7 +36,7 @@ export default function MemberDashboard() {
   const fetchAll = async () => {
     try {
       const [tr, nr, pr] = await Promise.all([
-        API.get('/tasks/my'),
+        API.get('/tasks/my').catch(() => ({ data: [] })),
         API.get('/notifications'),
         API.get('/profile')
       ])
@@ -438,6 +439,11 @@ export default function MemberDashboard() {
           <span className='rail-tooltip'>My Tasks</span>
         </div>
 
+        <div className={`rail-btn ${activeTab==='worksheet'?'active':''}`} onClick={()=>setActiveTab('worksheet')}>
+          <i className='fa-solid fa-table-list'/>
+          <span className='rail-tooltip'>Daily Sheet</span>
+        </div>
+
         <div className={`rail-btn ${activeTab==='notifications'?'active':''}`} onClick={()=>setActiveTab('notifications')}>
           <i className='fa-solid fa-bell'/>
           {unread > 0 && <span className='notif-dot'/>}
@@ -472,6 +478,7 @@ export default function MemberDashboard() {
           <div className='top-page'>
             {activeTab==='dashboard'&&'Dashboard'}
             {activeTab==='tasks'&&'My Tasks'}
+            {activeTab==='worksheet'&&'Daily Sheet'}
             {activeTab==='notifications'&&'Notifications'}
             {activeTab==='profile'&&'Profile & Settings'}
           </div>
@@ -488,7 +495,7 @@ export default function MemberDashboard() {
 
         <div className='content'>
           {/* DASHBOARD TAB */}
-          {activeTab==='dashboard' && (
+          {activeTab==='worksheet' && <WorksheetPanel isAdmin={false} />} && (
             <>
               {/* HERO */}
               <div className='hero' style={{animation:'up 0.4s ease 0.05s both'}}>
@@ -631,7 +638,7 @@ export default function MemberDashboard() {
                 </div>
               )}
             </>
-          )}
+          )
 
           {/* TASKS TAB */}
           {activeTab==='tasks' && (

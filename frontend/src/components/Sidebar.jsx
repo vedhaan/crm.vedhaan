@@ -7,6 +7,7 @@ const navItems = [
   { label: 'Invoices', path: '/invoices' },
   { label: 'Leads', path: '/leads' },
   { label: 'Tasks', path: '/tasks' },
+  { label: 'Daily Sheet', path: '/worksheet' },
 ]
 
 const Sidebar = () => {
