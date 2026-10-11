@@ -1,6 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap');
 
-.ws-layout{display:flex;min-height:100vh;background:#f7f6f4}
+html,body{margin:0;padding:0;background:#f7f6f4}
+
+.ws-layout{display:flex;min-height:100vh;background:#f7f6f4;font-family:'DM Sans',sans-serif}
+.ws-layout *{box-sizing:border-box}
+:where(.ws-layout) :is(h1,h2,h3,p){margin:0}
 .ws-main{flex:1;padding:36px 40px;min-width:0}
 .ws-pagehead{margin-bottom:22px}
 .ws-pagetitle{font-family:'Sora',sans-serif;font-size:24px;font-weight:700;color:#1a1a1a}
