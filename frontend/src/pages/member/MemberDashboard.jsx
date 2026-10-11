@@ -161,9 +161,9 @@ export default function MemberDashboard() {
   const fetchAll = async () => {
     try {
       const [tr, nr, pr] = await Promise.all([
-        API.get('/tasks/my'),
-        API.get('/notifications'),
-        API.get('/profile')
+        API.get('/tasks/my').catch(() => ({ data: [] })),
+        API.get('/notifications').catch(() => ({ data: [] })),
+        API.get('/profile').catch(() => ({ data: [] }))
       ])
       setTasks(tr.data)
       setNotifs(nr.data)
