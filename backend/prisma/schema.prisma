@@ -20,8 +20,9 @@ model User {
   phone         String?
   notifications Notification[]
   tasks         Task[]
-  workEntries WorkEntry[]
-  attendance  Attendance[]
+  workEntries   WorkEntry[]
+  attendance    Attendance[]
+  uploadedFiles TaskFile[]
 }
 
 model Client {
@@ -70,6 +71,21 @@ model Task {
   deadline    DateTime?
   createdAt   DateTime   @default(now())
   user        User       @relation(fields: [assignedTo], references: [id])
+  files       TaskFile[]
+}
+
+model TaskFile {
+  id           Int      @id @default(autoincrement())
+  taskId       Int
+  uploadedBy   Int
+  fileName     String
+  fileKey      String
+  fileSize     Int
+  mimeType     String
+  uploadedAt   DateTime @default(now())
+
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader     User     @relation(fields: [uploadedBy], references: [id])
 }
 
 model Notification {
