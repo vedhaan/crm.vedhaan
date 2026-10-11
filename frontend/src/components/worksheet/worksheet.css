@@ -1,5 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap');
-
 html,body{margin:0;padding:0;background:#f7f6f4}
 
 .ws-layout{display:flex;min-height:100vh;background:#f7f6f4;font-family:'DM Sans',sans-serif}
