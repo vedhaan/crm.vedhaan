@@ -38,7 +38,7 @@ const monthDates = (monthStr) => {
  * attendance: 'PRESENT' | 'ABSENT' | null
  * joinedStr: IST date the account was created (earlier days are not judged)
  */
-const computeDay = ({ dateStr, entries = [], attendance = null, isHoliday = false, joinedStr = null, now = istNow() }) => {
+const computeDay = ({ dateStr, entries = [], attendance = null, isHoliday = false, joinedStr = null, exempt = false, now = istNow() }) => {
   const isToday = dateStr === now.dateStr
   const isFuture = dateStr > now.dateStr
   const closed = dateStr < now.dateStr || (isToday && now.minutes >= LOCK_MIN)
@@ -50,7 +50,8 @@ const computeDay = ({ dateStr, entries = [], attendance = null, isHoliday = fals
   let status
   let marks = []
 
-  if (beforeJoin) status = 'NA'
+  if (exempt) status = 'EXEMPT'
+  else if (beforeJoin) status = 'NA'
   else if (attendance === 'ABSENT') status = 'ABSENT'
   else if (!working) status = 'OFF'
   else if (isFuture) status = 'FUTURE'

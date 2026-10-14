@@ -31,12 +31,15 @@ const deleteFromR2 = async (fileKey) => {
   await r2Client.send(command)
 }
 
-const getSignedDownloadUrl = async (fileKey, expiresIn = 3600) => {
+const getSignedDownloadUrl = async (fileKey, expiresIn = 3600, downloadName = null) => {
+  const safeName = downloadName
+    ? encodeURIComponent(downloadName).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    : null
   const command = new GetObjectCommand({
     Bucket: BUCKET,
     Key: fileKey,
+    ...(safeName && { ResponseContentDisposition: `attachment; filename*=UTF-8''${safeName}` }),
   })
   return await getSignedUrl(r2Client, command, { expiresIn })
 }
-
 module.exports = { uploadToR2, deleteFromR2, getSignedDownloadUrl }

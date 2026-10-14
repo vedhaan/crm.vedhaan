@@ -1,5 +1,7 @@
+import API from '../../api/axios'
 export const PLAN_SECS = 11 * 3600 + 45 * 60
 export const LOCK_SECS = 18 * 3600
+export const STATUS_OPTIONS_LABEL = { PENDING: 'Pending', IN_PROGRESS: 'In Progress', DONE: 'Done' }
 const IST_MS = 330 * 60 * 1000
 
 // The server clock is the only clock that matters. These helpers are used
@@ -78,7 +80,8 @@ export const STATUS_META = {
   ABSENT: { label: 'Absent', cls: 'amber' },
   OFF: { label: 'Off day', cls: 'grey' },
   FUTURE: { label: 'Upcoming', cls: 'grey' },
-  NA: { label: 'Not joined', cls: 'grey' }
+  NA: { label: 'Not joined', cls: 'grey' },
+  EXEMPT: { label: 'Admin sheet', cls: 'grey' },
 }
 
 export const MARK_META = {
@@ -90,3 +93,36 @@ export const dotClasses = (state) =>
   state.marks.length
     ? state.marks.map((m) => MARK_META[m].cls)
     : [STATUS_META[state.status] ? STATUS_META[state.status].cls : 'grey']
+
+export const ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.rtf,.md,.odt,.ods,.odp,.png,.jpg,.jpeg,.gif,.webp,.zip,.rar,.7z'
+export const MAX_FILE_MB = 15
+export const MAX_FILES_PER_ROW = 10
+
+export const formatBytes = (b) =>
+  b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`
+
+export const extOf = (name) => {
+  const i = name.lastIndexOf('.')
+  return i >= 0 ? name.slice(i).toLowerCase() : ''
+}
+
+export const isAllowedFile = (name) => ACCEPT.split(',').includes(extOf(name))
+
+export const fileBadge = (name) => {
+  const e = extOf(name)
+  if (['.doc', '.docx', '.odt', '.rtf'].includes(e)) return { label: 'DOC', cls: 'doc' }
+  if (['.xls', '.xlsx', '.csv', '.ods'].includes(e)) return { label: 'XLS', cls: 'xls' }
+  if (['.ppt', '.pptx', '.odp'].includes(e)) return { label: 'PPT', cls: 'ppt' }
+  if (e === '.pdf') return { label: 'PDF', cls: 'pdf' }
+  if (['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(e)) return { label: 'IMG', cls: 'img' }
+  if (['.zip', '.rar', '.7z'].includes(e)) return { label: 'ZIP', cls: 'zip' }
+  return { label: 'TXT', cls: 'txt' }
+}
+
+export const progressPct = (e) =>
+  e.targetCount ? Math.min(100, Math.round((e.doneCount / e.targetCount) * 100)) : e.status === 'DONE' ? 100 : 0
+
+export const downloadWorksheetFile = async (id) => {
+  const r = await API.get(`/worksheet/files/${id}/download`)
+  window.location.assign(r.data.url)
+}

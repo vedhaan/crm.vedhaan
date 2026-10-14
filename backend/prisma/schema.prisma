@@ -143,6 +143,8 @@ model WorkEntry {
   position    Int        @default(0)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  isShared    Boolean    @default(false)
+  files       WorkEntryFile[]
 
   user        User       @relation(fields: [userId], references: [id])
 
@@ -194,4 +196,21 @@ enum WorkStatus {
 enum AttendanceStatus {
   PRESENT
   ABSENT
+}
+
+model WorkEntryFile {
+  id           Int       @id @default(autoincrement())
+  entryId      Int
+  uploadedBy   Int
+  uploaderName String    @db.VarChar(100)
+  byAdmin      Boolean   @default(false)
+  fileName     String    @db.VarChar(255)
+  fileKey      String
+  fileSize     Int
+  mimeType     String    @db.VarChar(150)
+  createdAt    DateTime  @default(now())
+
+  entry        WorkEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
 }

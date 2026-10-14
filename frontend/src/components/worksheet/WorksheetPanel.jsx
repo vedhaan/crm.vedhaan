@@ -2,11 +2,13 @@ import { useState } from 'react'
 import DaySheet from './DaySheet'
 import MonthView from './MonthView'
 import HolidayManager from './HolidayManager'
+import Dashboard from './Dashboard'
+import SharedByAdmin from './SharedByAdmin'
 import './worksheet.css'
 
 export default function WorksheetPanel({ isAdmin }) {
-  const [tab, setTab] = useState('day')
-  const [date, setDate] = useState('') // empty string means "today" on the server
+  const [tab, setTab] = useState(isAdmin ? 'dashboard' : 'day')
+  const [date, setDate] = useState('')
   const [selectedId, setSelectedId] = useState(null)
 
   const openDay = (d, userId) => {
@@ -15,25 +17,23 @@ export default function WorksheetPanel({ isAdmin }) {
     setTab('day')
   }
 
+  const tabs = isAdmin
+    ? [['dashboard', 'Dashboard'], ['day', 'Day Sheet'], ['month', 'Month Overview'], ['holidays', 'Holidays']]
+    : [['day', 'My Sheet'], ['shared', 'Shared by Admin'], ['month', 'My Month']]
+
   return (
     <div className='ws-root'>
       <div className='ws-tabs'>
-        <button className={`ws-tab ${tab === 'day' ? 'on' : ''}`} onClick={() => setTab('day')}>Day Sheet</button>
-        <button className={`ws-tab ${tab === 'month' ? 'on' : ''}`} onClick={() => setTab('month')}>Month Overview</button>
-        {isAdmin && (
-          <button className={`ws-tab ${tab === 'holidays' ? 'on' : ''}`} onClick={() => setTab('holidays')}>Holidays</button>
-        )}
+        {tabs.map(([key, label]) => (
+          <button key={key} className={`ws-tab ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>{label}</button>
+        ))}
       </div>
 
+      {tab === 'dashboard' && isAdmin && <Dashboard onOpen={openDay} />}
       {tab === 'day' && (
-        <DaySheet
-          isAdmin={isAdmin}
-          date={date}
-          setDate={setDate}
-          selectedId={selectedId}
-          setSelectedId={setSelectedId}
-        />
+        <DaySheet isAdmin={isAdmin} date={date} setDate={setDate} selectedId={selectedId} setSelectedId={setSelectedId} />
       )}
+      {tab === 'shared' && !isAdmin && <SharedByAdmin />}
       {tab === 'month' && <MonthView isAdmin={isAdmin} onPick={openDay} />}
       {tab === 'holidays' && isAdmin && <HolidayManager />}
     </div>

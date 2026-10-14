@@ -1,11 +1,29 @@
 const prisma = require('../utils/prisma')
 const W = require('../utils/workday')
+const { deleteFromR2 } = require('../utils/r2')
 
 const MAX_ROWS_PER_DAY = 50
 const STATUSES = ['PENDING', 'IN_PROGRESS', 'DONE']
 const isAdmin = (req) => req.user.role === 'ADMIN'
 
-const fmtEntry = (e) => ({ ...e, workDate: W.toDateStr(e.workDate) })
+const FILES_INCLUDE = { files: { orderBy: { id: 'asc' } } }
+
+const fmtFile = (f) => ({
+  id: f.id,
+  entryId: f.entryId,
+  fileName: f.fileName,
+  fileSize: f.fileSize,
+  mimeType: f.mimeType,
+  uploadedBy: f.uploadedBy,
+  uploaderName: f.uploaderName,
+  byAdmin: f.byAdmin,
+  createdAt: f.createdAt
+})
+
+const fmtEntry = (e) => {
+  const { files, ...rest } = e
+  return { ...rest, workDate: W.toDateStr(e.workDate), files: (files || []).map(fmtFile) }
+}
 const plain = (v) => (v ? JSON.parse(JSON.stringify(v)) : undefined)
 
 const logChange = async (actorId, userId, dateStr, entryId, action, before, after) => {
@@ -31,11 +49,12 @@ const loadContext = async (userId, dateStr, now = W.istNow()) => {
   const [entries, attendance, holiday, user] = await Promise.all([
     prisma.workEntry.findMany({
       where: { userId, workDate: date },
+      include: FILES_INCLUDE,
       orderBy: [{ position: 'asc' }, { id: 'asc' }]
     }),
     prisma.attendance.findUnique({ where: { userId_date: { userId, date } } }),
     prisma.holiday.findUnique({ where: { date } }),
-    prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, createdAt: true } })
+    prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true, createdAt: true } })
   ])
 
   const state = W.computeDay({
@@ -44,6 +63,7 @@ const loadContext = async (userId, dateStr, now = W.istNow()) => {
     attendance: attendance ? attendance.status : null,
     isHoliday: !!holiday,
     joinedStr: user ? W.istNow(user.createdAt).dateStr : null,
+    exempt: !!user && user.role === 'ADMIN',
     now
   })
 
@@ -113,7 +133,7 @@ const doneRuleError = ({ status, targetCount, doneCount }) => {
 
 const dayPayload = (ctx) => ({
   serverNow: new Date().toISOString(),
-  user: ctx.user ? { id: ctx.user.id, name: ctx.user.name } : null,
+  user: ctx.user ? { id: ctx.user.id, name: ctx.user.name, role: ctx.user.role } : null,
   state: ctx.state,
   attendance: ctx.attendance ? { status: ctx.attendance.status, note: ctx.attendance.note } : null,
   holiday: ctx.holiday ? { name: ctx.holiday.name } : null,
@@ -153,17 +173,19 @@ const getDayAll = async (req, res) => {
 
     const [users, entries, attendance, holiday] = await Promise.all([
       prisma.user.findMany({
-        where: { role: 'MEMBER' },
-        select: { id: true, name: true, createdAt: true },
-        orderBy: { name: 'asc' }
+        where: { role: { in: ['MEMBER', 'ADMIN'] } },
+        select: { id: true, name: true, role: true, createdAt: true }
       }),
       prisma.workEntry.findMany({
         where: { workDate: date },
+        include: FILES_INCLUDE,
         orderBy: [{ position: 'asc' }, { id: 'asc' }]
       }),
       prisma.attendance.findMany({ where: { date } }),
       prisma.holiday.findUnique({ where: { date } })
     ])
+
+    users.sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'ADMIN' ? -1 : 1))
 
     const staff = users.map((u) => {
       const es = entries.filter((e) => e.userId === u.id)
@@ -174,10 +196,11 @@ const getDayAll = async (req, res) => {
         attendance: att ? att.status : null,
         isHoliday: !!holiday,
         joinedStr: W.istNow(u.createdAt).dateStr,
+        exempt: u.role === 'ADMIN',
         now
       })
       return {
-        user: { id: u.id, name: u.name },
+        user: { id: u.id, name: u.name, role: u.role },
         attendance: att ? { status: att.status, note: att.note } : null,
         state,
         entries: es.map(fmtEntry)
@@ -295,7 +318,7 @@ const createEntry = async (req, res) => {
         return res.status(400).json({ message: `Maximum ${MAX_ROWS_PER_DAY} rows per day` })
       }
     }
-
+    if (!admin || ctx.user.role !== 'ADMIN') delete data.isShared
     const doneErr = doneRuleError({
       status: data.status || 'PENDING',
       targetCount: data.targetCount ?? null,
@@ -312,7 +335,8 @@ const createEntry = async (req, res) => {
         workDate: W.parseDateStr(dateStr),
         isLate: !admin && ctx.state.planFrozen,
         position: maxPos + 1
-      }
+      },
+      include: FILES_INCLUDE
     })
 
     if (admin) await logChange(req.user.id, userId, dateStr, entry.id, 'CREATE', null, entry)
@@ -328,7 +352,7 @@ const updateEntry = async (req, res) => {
   try {
     const admin = isAdmin(req)
     const id = parseInt(req.params.id)
-    const existing = await prisma.workEntry.findUnique({ where: { id } })
+    const existing = await prisma.workEntry.findUnique({ where: { id }, include: FILES_INCLUDE })
     if (!existing || (!admin && existing.userId !== req.user.id)) {
       return res.status(404).json({ message: 'Entry not found' })
     }
@@ -357,6 +381,7 @@ const updateEntry = async (req, res) => {
       }
     }
 
+    if (!admin || ctx.user.role !== 'ADMIN') delete data.isShared
     const merged = {
       status: data.status ?? existing.status,
       targetCount: 'targetCount' in data ? data.targetCount : existing.targetCount,
@@ -367,7 +392,7 @@ const updateEntry = async (req, res) => {
 
     if (Object.keys(data).length === 0) return res.json({ entry: fmtEntry(existing) })
 
-    const entry = await prisma.workEntry.update({ where: { id }, data })
+    const entry = await prisma.workEntry.update({ where: { id }, data, include: FILES_INCLUDE })
 
     if (admin) await logChange(req.user.id, existing.userId, dateStr, id, 'UPDATE', existing, entry)
 
@@ -382,7 +407,7 @@ const deleteEntry = async (req, res) => {
   try {
     const admin = isAdmin(req)
     const id = parseInt(req.params.id)
-    const existing = await prisma.workEntry.findUnique({ where: { id } })
+    const existing = await prisma.workEntry.findUnique({ where: { id }, include: FILES_INCLUDE })
     if (!existing || (!admin && existing.userId !== req.user.id)) {
       return res.status(404).json({ message: 'Entry not found' })
     }
@@ -393,14 +418,12 @@ const deleteEntry = async (req, res) => {
       const ctx = await loadContext(existing.userId, dateStr)
       if (ctx.state.writeBlock) return res.status(403).json(ctx.state.writeBlock)
       if (ctx.state.planFrozen) {
-        return res.status(403).json({
-          code: 'PLAN_FROZEN',
-          message: 'Rows cannot be deleted after 11:45 AM.'
-        })
+        return res.status(403).json({ code: 'PLAN_FROZEN', message: 'Rows cannot be deleted after 11:45 AM.' })
       }
     }
 
     await prisma.workEntry.delete({ where: { id } })
+    await Promise.all(existing.files.map((f) => deleteFromR2(f.fileKey).catch(() => {})))
 
     if (admin) await logChange(req.user.id, existing.userId, dateStr, id, 'DELETE', existing, null)
 
@@ -498,5 +521,9 @@ module.exports = {
   setAttendance,
   getHolidays,
   createHoliday,
-  deleteHoliday
+  deleteHoliday,
+  loadContext, 
+  fmtFile, 
+  fmtEntry, 
+  logChange
 }

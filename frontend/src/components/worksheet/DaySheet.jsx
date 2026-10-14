@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import API from '../../api/axios'
+import { useAuth } from '../../context/AuthContext'
+import RowDrawer from './RowDrawer'
 import {
   STATUS_META, MARK_META, addDays, countLinks, dotClasses,
-  fmtCountdown, fmtDateLong, getApiError, liveFlags, proofLinks
+  fmtCountdown, fmtDateLong, getApiError, liveFlags, progressPct
 } from './worksheetUtils'
 
 const STATUS_OPTIONS = [
@@ -11,7 +13,6 @@ const STATUS_OPTIONS = [
   ['DONE', 'Done']
 ]
 
-// Inline editable cell. Commits on blur or Enter, Escape cancels.
 function Cell({ value, type = 'text', disabled, onCommit, placeholder }) {
   const [draft, setDraft] = useState(String(value ?? ''))
   const focused = useRef(false)
@@ -60,59 +61,14 @@ function Cell({ value, type = 'text', disabled, onCommit, placeholder }) {
   )
 }
 
-function ProofModal({ entry, editable, onClose, onSave }) {
-  const [text, setText] = useState(entry.proof || '')
-  const [saving, setSaving] = useState(false)
-  const links = proofLinks(text)
-
-  const save = async () => {
-    setSaving(true)
-    const ok = await onSave(entry, text)
-    setSaving(false)
-    if (ok) onClose()
-  }
-
-  return (
-    <div className='ws-overlay' onClick={onClose}>
-      <div className='ws-modal' onClick={(e) => e.stopPropagation()}>
-        <h3 className='ws-modal-title'>Proof: {entry.title}</h3>
-        <p className='ws-hint'>One link per line. {links.length} link{links.length !== 1 ? 's' : ''} detected.</p>
-        <textarea
-          className='ws-textarea'
-          value={text}
-          readOnly={!editable}
-          maxLength={20000}
-          onChange={(e) => setText(e.target.value)}
-          placeholder='https://example.com/your-backlink'
-        />
-        {links.length > 0 && (
-          <div className='ws-linklist'>
-            {links.slice(0, 100).map((l, i) => (
-              <a key={i} href={l} target='_blank' rel='noreferrer'>{l}</a>
-            ))}
-            {links.length > 100 && <span className='ws-hint'>and {links.length - 100} more</span>}
-          </div>
-        )}
-        <div className='ws-modal-actions'>
-          <button className='ws-btn' onClick={onClose}>{editable ? 'Cancel' : 'Close'}</button>
-          {editable && (
-            <button className='ws-btn primary' onClick={save} disabled={saving}>
-              {saving ? 'Saving...' : 'Save proof'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelectedId }) {
+  const { user } = useAuth()
   const [sheets, setSheets] = useState([])
   const [shownDate, setShownDate] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
-  const [proofFor, setProofFor] = useState(null)
+  const [drawerId, setDrawerId] = useState(null)
   const [form, setForm] = useState({ title: '', client: '', target: '' })
   const [adding, setAdding] = useState(false)
   const [, setTick] = useState(0)
@@ -170,7 +126,6 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   const nowMs = Date.now() + offsetRef.current
   const flags = shownDate ? liveFlags(shownDate, nowMs) : null
 
-  // When the 11:45 AM or 6:00 PM boundary passes, refetch so marks and locks are fresh
   useEffect(() => {
     if (!flags) return
     const key = `${shownDate}|${flags.planFrozen}|${flags.closed}`
@@ -181,11 +136,18 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   const sheet = sheets.find((s) => s.user && s.user.id === selectedId) || sheets[0] || null
   const st = sheet ? sheet.state : null
   const entries = sheet ? sheet.entries : []
+  const ownSheet = !!sheet && sheet.user.role === 'ADMIN'
 
   const staffCanWrite = !isAdmin && !!st && st.canStaffWrite && !!flags && !flags.closed
   const canWrite = isAdmin || staffCanWrite
   const planEditable = isAdmin || (staffCanWrite && !flags.planFrozen)
   const execEditable = canWrite
+
+  const canDeleteFile = (f) => {
+    if (isAdmin) return true
+    if (!staffCanWrite || f.uploadedBy !== (user && user.id)) return false
+    return !flags.planFrozen || nowMs - Date.parse(f.createdAt) < 15 * 60 * 1000
+  }
 
   const replaceEntry = (entry) => {
     setSheets((prev) => prev.map((s) =>
@@ -209,7 +171,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   }
 
   const removeRow = async (entry) => {
-    if (!window.confirm('Delete this row?')) return
+    if (!window.confirm('Delete this row and its files?')) return
     try {
       await API.delete(`/worksheet/entries/${entry.id}`)
       await load()
@@ -263,6 +225,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
 
   const adminInfo = () => {
     if (!isAdmin || !st) return null
+    if (ownSheet) return 'This is your own sheet. It has no time locks and is not marked red or blue. Use the file panel to share rows with staff.'
     if (st.status === 'ABSENT') return 'Marked absent. Staff cannot edit this day. Admin edits are still allowed.'
     if (st.status === 'OFF') return sheet.holiday ? `Holiday: ${sheet.holiday.name}.` : 'Weekly off.'
     return null
@@ -272,14 +235,16 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   const att = sheet && sheet.attendance ? sheet.attendance.status : null
   const doneCount = entries.filter((e) => e.status === 'DONE').length
   const totalLinks = entries.reduce((n, e) => n + countLinks(e.proof), 0)
+  const totalFiles = entries.reduce((n, e) => n + e.files.length, 0)
 
   let countdown = null
-  if (flags && st && flags.isToday && st.working && !flags.closed) {
+  if (flags && st && !ownSheet && flags.isToday && st.working && !flags.closed) {
     if (!flags.planFrozen) countdown = { text: `Plan due in ${fmtCountdown(flags.secsToPlan)}`, urgent: flags.secsToPlan <= 900 }
     else countdown = { text: `Sheet locks in ${fmtCountdown(flags.secsToLock)}`, urgent: flags.secsToLock <= 900 }
   }
 
   const message = lockedText() || adminInfo()
+  const drawerEntry = entries.find((e) => e.id === drawerId) || null
 
   return (
     <div>
@@ -288,12 +253,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
       <div className='ws-toolbar'>
         <div className='ws-datenav'>
           <button className='ws-btn' onClick={() => shownDate && setDate(addDays(shownDate, -1))}>Prev</button>
-          <input
-            className='ws-in'
-            type='date'
-            value={shownDate}
-            onChange={(e) => e.target.value && setDate(e.target.value)}
-          />
+          <input className='ws-in' type='date' value={shownDate} onChange={(e) => e.target.value && setDate(e.target.value)} />
           <button className='ws-btn' onClick={() => shownDate && setDate(addDays(shownDate, 1))}>Next</button>
           <button className='ws-btn' onClick={() => setDate('')}>Today</button>
         </div>
@@ -316,13 +276,13 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
               <span className='ws-dots'>
                 {dotClasses(s.state).map((c, i) => <i key={i} className={`ws-dot ${c}`} />)}
               </span>
-              {s.user.name}
+              {s.user.name}{s.user.role === 'ADMIN' ? ' (Admin)' : ''}
             </button>
           ))}
         </div>
       )}
 
-      {isAdmin && sheet && (
+      {isAdmin && sheet && !ownSheet && (
         <div className='ws-att'>
           <span className='ws-att-label'>Attendance for {sheet.user.name}:</span>
           <button className={`ws-btn small ${att === 'ABSENT' ? 'amber' : ''}`} onClick={() => setAttendance('ABSENT')}>Absent</button>
@@ -348,6 +308,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
           <div className='ws-summary'>
             <span><b>{entries.length}</b> rows</span>
             <span><b>{doneCount}</b> done</span>
+            <span><b>{totalFiles}</b> files</span>
             <span><b>{totalLinks}</b> proof links</span>
           </div>
 
@@ -362,27 +323,39 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
                   <th className='w-num'>Done</th>
                   <th className='w-status'>Status</th>
                   <th className='w-rem'>Remarks</th>
-                  <th className='w-proof'>Proof</th>
+                  <th className='w-proof'>Files</th>
                   <th className='w-del' />
                 </tr>
               </thead>
               <tbody>
                 {entries.length === 0 && (
-                  <tr><td colSpan={9} className='ws-norows'>No work added for this day.</td></tr>
+                  <tr className='ws-emptyrow'><td colSpan={9} className='ws-norows'>No work added for this day.</td></tr>
                 )}
                 {entries.map((e, i) => {
                   const links = countLinks(e.proof)
+                  const fc = e.files.length
+                  const label = fc || links
+                    ? [fc ? `${fc} file${fc !== 1 ? 's' : ''}` : '', links ? `${links} link${links !== 1 ? 's' : ''}` : ''].filter(Boolean).join(' + ')
+                    : (canWrite ? 'Add' : '-')
                   return (
-                    <tr key={e.id} className={`${e.status === 'DONE' ? 'done' : ''}`}>
-                      <td className='ws-idx'>
+                    <tr key={e.id} className={`ws-tr ${e.status.toLowerCase()}`}>
+                      <td className='ws-idx' data-label='#'>
                         {i + 1}
                         {e.isLate && <span className='ws-late' title='Added after 11:45 AM'>LATE</span>}
+                        {e.isShared && <span className='ws-shared' title='Visible to staff'>SHARED</span>}
                       </td>
-                      <td><Cell value={e.title} disabled={!planEditable} onCommit={(v) => patch(e, 'title', v)} /></td>
-                      <td><Cell value={e.client || ''} disabled={!planEditable} onCommit={(v) => patch(e, 'client', v)} /></td>
-                      <td><Cell type='number' value={e.targetCount ?? ''} disabled={!planEditable} onCommit={(v) => patch(e, 'targetCount', v)} /></td>
-                      <td><Cell type='number' value={e.doneCount} disabled={!execEditable} onCommit={(v) => patch(e, 'doneCount', v)} /></td>
-                      <td>
+                      <td data-label='Task'><Cell value={e.title} disabled={!planEditable} onCommit={(v) => patch(e, 'title', v)} /></td>
+                      <td data-label='Client'><Cell value={e.client || ''} disabled={!planEditable} onCommit={(v) => patch(e, 'client', v)} /></td>
+                      <td data-label='Target'><Cell type='number' value={e.targetCount ?? ''} disabled={!planEditable} onCommit={(v) => patch(e, 'targetCount', v)} /></td>
+                      <td data-label='Done'>
+                        <div className='ws-donecell'>
+                          <Cell type='number' value={e.doneCount} disabled={!execEditable} onCommit={(v) => patch(e, 'doneCount', v)} />
+                          {e.targetCount ? (
+                            <div className={`ws-bar ${progressPct(e) === 100 ? 'full' : ''}`}><i style={{ width: `${progressPct(e)}%` }} /></div>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td data-label='Status'>
                         <select
                           className={`ws-select ${e.status.toLowerCase()}`}
                           value={e.status}
@@ -392,13 +365,11 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
                           {STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                         </select>
                       </td>
-                      <td><Cell value={e.remarks || ''} disabled={!execEditable} onCommit={(v) => patch(e, 'remarks', v)} /></td>
-                      <td>
-                        <button className={`ws-proof ${e.proof ? 'has' : ''}`} onClick={() => setProofFor(e)}>
-                          {e.proof ? (links > 0 ? `${links} link${links !== 1 ? 's' : ''}` : 'Notes') : (execEditable ? 'Add' : '-')}
-                        </button>
+                      <td data-label='Remarks'><Cell value={e.remarks || ''} disabled={!execEditable} onCommit={(v) => patch(e, 'remarks', v)} /></td>
+                      <td data-label='Files'>
+                        <button className={`ws-proof ${fc || links ? 'has' : ''}`} onClick={() => setDrawerId(e.id)}>{label}</button>
                       </td>
-                      <td>
+                      <td data-label=''>
                         {planEditable && <button className='ws-del' onClick={() => removeRow(e)}>Delete</button>}
                       </td>
                     </tr>
@@ -410,28 +381,9 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
 
           {canWrite && (
             <form className='ws-add' onSubmit={addRow}>
-              <input
-                className='ws-in grow'
-                placeholder='New task, e.g. Create 50 backlinks'
-                value={form.title}
-                maxLength={300}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-              />
-              <input
-                className='ws-in'
-                placeholder='Client / Project'
-                value={form.client}
-                maxLength={150}
-                onChange={(e) => setForm({ ...form, client: e.target.value })}
-              />
-              <input
-                className='ws-in narrow'
-                type='number'
-                min='1'
-                placeholder='Target'
-                value={form.target}
-                onChange={(e) => setForm({ ...form, target: e.target.value })}
-              />
+              <input className='ws-in grow' placeholder='New task, e.g. Create 50 backlinks' value={form.title} maxLength={300} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              <input className='ws-in' placeholder='Client / Project' value={form.client} maxLength={150} onChange={(e) => setForm({ ...form, client: e.target.value })} />
+              <input className='ws-in narrow' type='number' min='1' placeholder='Target' value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} />
               <button type='submit' className='ws-btn primary' disabled={adding || !form.title.trim()}>
                 {adding ? 'Adding...' : 'Add row'}
               </button>
@@ -440,12 +392,19 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
         </>
       )}
 
-      {proofFor && (
-        <ProofModal
-          entry={proofFor}
-          editable={execEditable}
-          onClose={() => setProofFor(null)}
-          onSave={(entry, text) => patch(entry, 'proof', text)}
+      {drawerEntry && (
+        <RowDrawer
+          key={drawerEntry.id}
+          entry={drawerEntry}
+          isAdmin={isAdmin}
+          ownerIsAdmin={ownSheet}
+          canUpload={canWrite}
+          canEditProof={execEditable}
+          canDeleteFile={canDeleteFile}
+          onPatch={patch}
+          onChanged={load}
+          onClose={() => setDrawerId(null)}
+          flash={flash}
         />
       )}
     </div>
