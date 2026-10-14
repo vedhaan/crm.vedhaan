@@ -12,7 +12,7 @@ const cellClass = (c) => {
 const cellTitle = (c) => {
   const text = c.marks.length
     ? c.marks.map((m) => (m === 'RED' ? 'Unfinished' : 'Late plan')).join(' + ')
-    : STATUS_META[c.status].label
+    : statusMeta(c.status).label
   return `${c.date}: ${text}`
 }
 

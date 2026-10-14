@@ -185,7 +185,7 @@ const getDayAll = async (req, res) => {
       prisma.holiday.findUnique({ where: { date } })
     ])
 
-    users.sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'ADMIN' ? -1 : 1))
+        users.sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'ADMIN' ? 1 : -1))
 
     const staff = users.map((u) => {
       const es = entries.filter((e) => e.userId === u.id)

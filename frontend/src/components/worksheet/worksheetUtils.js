@@ -72,6 +72,7 @@ export const proofLinks = (proof) =>
 export const countLinks = (proof) => proofLinks(proof).length
 
 export const getApiError = (err, fallback) => err?.response?.data?.message || fallback
+export const statusMeta = (s) => STATUS_META[s] || { label: s, cls: 'grey' }
 
 export const STATUS_META = {
   OPEN: { label: 'Open', cls: 'open' },
@@ -83,6 +84,11 @@ export const STATUS_META = {
   NA: { label: 'Not joined', cls: 'grey' },
   EXEMPT: { label: 'Admin sheet', cls: 'grey' },
 }
+
+export const chipsFor = (state) =>
+  state.status === 'FLAGGED'
+    ? state.marks.map((m) => MARK_META[m] || { label: m, cls: 'grey' })
+    : [statusMeta(state.status)]
 
 export const MARK_META = {
   RED: { label: 'Unfinished', cls: 'red' },

@@ -230,8 +230,8 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
     if (st.status === 'OFF') return sheet.holiday ? `Holiday: ${sheet.holiday.name}.` : 'Weekly off.'
     return null
   }
-
-  const chips = st ? (st.status === 'FLAGGED' ? st.marks.map((m) => MARK_META[m]) : [STATUS_META[st.status]]) : []
+  
+  const chips = st ? chipsFor(st) : []
   const att = sheet && sheet.attendance ? sheet.attendance.status : null
   const doneCount = entries.filter((e) => e.status === 'DONE').length
   const totalLinks = entries.reduce((n, e) => n + countLinks(e.proof), 0)

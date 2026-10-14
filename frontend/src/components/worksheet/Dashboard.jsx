@@ -67,7 +67,7 @@ export default function Dashboard({ onOpen }) {
         {sorted.length === 0 && <div className='ws-empty'>No staff members found.</div>}
         {sorted.map((s) => {
           const st = s.state
-          const chips = st.status === 'FLAGGED' ? st.marks.map((m) => MARK_META[m]) : [STATUS_META[st.status]]
+          const chips = chipsFor(st)
           return (
             <div key={s.user.id} className={`ws-scard ${dotClasses(st)[0]}`}>
               <div className='ws-sc-top'>
