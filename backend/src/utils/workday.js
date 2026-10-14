@@ -5,6 +5,10 @@ const IST_OFFSET_MS = 330 * 60 * 1000
 const PLAN_DEADLINE_MIN = 11 * 60 + 45 // 11:45 AM
 const LOCK_MIN = 18 * 60               // 6:00 PM
 
+const START_DATE = /^\d{4}-\d{2}-\d{2}$/.test(process.env.WORKSHEET_START_DATE || '')
+  ? process.env.WORKSHEET_START_DATE
+  : null
+
 const istNow = (date = new Date()) => {
   const s = new Date(date.getTime() + IST_OFFSET_MS).toISOString()
   return {
@@ -12,6 +16,12 @@ const istNow = (date = new Date()) => {
     time: s.slice(11, 16),
     minutes: Number(s.slice(11, 13)) * 60 + Number(s.slice(14, 16))
   }
+}
+
+// Days before the later of (account creation, tracking start) are never judged
+const judgedFrom = (createdAt) => {
+  const joined = istNow(createdAt).dateStr
+  return START_DATE && START_DATE > joined ? START_DATE : joined
 }
 
 // Date column values come back from Prisma as UTC midnight
@@ -103,5 +113,6 @@ module.exports = {
   parseDateStr,
   isSunday,
   monthDates,
-  computeDay
+  computeDay,
+  judgedFrom
 }

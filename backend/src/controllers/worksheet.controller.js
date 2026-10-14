@@ -62,7 +62,7 @@ const loadContext = async (userId, dateStr, now = W.istNow()) => {
     entries,
     attendance: attendance ? attendance.status : null,
     isHoliday: !!holiday,
-    joinedStr: user ? W.istNow(user.createdAt).dateStr : null,
+    joinedStr: user ? W.judgedFrom(user.createdAt) : null,
     exempt: !!user && user.role === 'ADMIN',
     now
   })
@@ -195,7 +195,7 @@ const getDayAll = async (req, res) => {
         entries: es,
         attendance: att ? att.status : null,
         isHoliday: !!holiday,
-        joinedStr: W.istNow(u.createdAt).dateStr,
+        joinedStr: W.judgedFrom(u.createdAt),
         exempt: u.role === 'ADMIN',
         now
       })
@@ -257,18 +257,25 @@ const getMonth = async (req, res) => {
     const holidaySet = new Set(holidays.map((h) => W.toDateStr(h.date)))
 
     const result = users.map((u) => {
-      const joinedStr = W.istNow(u.createdAt).dateStr
-      const cells = dates.map((d) => {
+      const joinedStr = W.judgedFrom(u.createdAt)
+            const cells = dates.map((d) => {
         const k = `${u.id}|${d}`
+        const list = entryMap.get(k) || []
         const s = W.computeDay({
           dateStr: d,
-          entries: entryMap.get(k) || [],
+          entries: list,
           attendance: attMap.get(k) || null,
           isHoliday: holidaySet.has(d),
           joinedStr,
           now
         })
-        return { date: d, status: s.status, marks: s.marks }
+        return {
+          date: d,
+          status: s.status,
+          marks: s.marks,
+          rows: list.length,
+          done: list.filter((x) => x.status === 'DONE').length
+        }
       })
       return {
         id: u.id,
