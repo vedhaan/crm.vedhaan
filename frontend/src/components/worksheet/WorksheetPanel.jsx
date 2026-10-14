@@ -4,6 +4,7 @@ import MonthView from './MonthView'
 import HolidayManager from './HolidayManager'
 import Dashboard from './Dashboard'
 import SharedByAdmin from './SharedByAdmin'
+import WorksheetBoundary from './WorksheetBoundary'
 import './worksheet.css'
 
 export default function WorksheetPanel({ isAdmin }) {
@@ -28,14 +29,15 @@ export default function WorksheetPanel({ isAdmin }) {
           <button key={key} className={`ws-tab ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>{label}</button>
         ))}
       </div>
-
-      {tab === 'dashboard' && isAdmin && <Dashboard onOpen={openDay} />}
-      {tab === 'day' && (
-        <DaySheet isAdmin={isAdmin} date={date} setDate={setDate} selectedId={selectedId} setSelectedId={setSelectedId} />
-      )}
-      {tab === 'shared' && !isAdmin && <SharedByAdmin />}
-      {tab === 'month' && <MonthView isAdmin={isAdmin} onPick={openDay} />}
-      {tab === 'holidays' && isAdmin && <HolidayManager />}
+      <WorksheetBoundary>
+        {tab === 'dashboard' && isAdmin && <Dashboard onOpen={openDay} />}
+        {tab === 'day' && (
+          <DaySheet isAdmin={isAdmin} date={date} setDate={setDate} selectedId={selectedId} setSelectedId={setSelectedId} />
+        )}
+        {tab === 'shared' && !isAdmin && <SharedByAdmin />}
+        {tab === 'month' && <MonthView isAdmin={isAdmin} onPick={openDay} />}
+        {tab === 'holidays' && isAdmin && <HolidayManager />}
+      </WorksheetBoundary>
     </div>
   )
 }
