@@ -54,6 +54,9 @@ function TaskFilePanel({ taskId, userId }) {
     finally { setLoading(false) }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchFiles() }, [taskId])
+
   const handleUpload = async (fileList) => {
     if (!fileList || fileList.length === 0) return
     setError('')
@@ -156,7 +159,6 @@ export default function MemberDashboard() {
   const [profileMsg, setProfileMsg]     = useState(null)
   const [pwMsg, setPwMsg]               = useState(null)
   const [openFilePanels, setOpenFilePanels] = useState({}) // taskId -> bool
-  const fileRef = useRef()
 
   const fetchAll = async () => {
     try {

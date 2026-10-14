@@ -3,8 +3,8 @@ import API from '../../api/axios'
 import { useAuth } from '../../context/AuthContext'
 import RowDrawer from './RowDrawer'
 import {
-  STATUS_META, MARK_META, addDays, countLinks, dotClasses,
-  fmtCountdown, fmtDateLong, getApiError, liveFlags, progressPct
+  addDays, chipsFor, countLinks, dotClasses, fmtCountdown,
+  fmtDateLong, getApiError, liveFlags, progressPct
 } from './worksheetUtils'
 
 const STATUS_OPTIONS = [
@@ -71,7 +71,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   const [drawerId, setDrawerId] = useState(null)
   const [form, setForm] = useState({ title: '', client: '', target: '' })
   const [adding, setAdding] = useState(false)
-  const [, setTick] = useState(0)
+  const [nowMs, setNowMs] = useState(() => Date.now())
   const offsetRef = useRef(0)
   const toastTimer = useRef(null)
   const prevKey = useRef(null)
@@ -103,6 +103,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
         }])
       }
       setError('')
+      setNowMs(Date.now() + offsetRef.current)
     } catch (e) {
       setError(getApiError(e, 'Failed to load the sheet'))
     } finally {
@@ -119,11 +120,10 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   }, [load])
 
   useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 1000)
+    const t = setInterval(() => setNowMs(Date.now() + offsetRef.current), 1000)
     return () => clearInterval(t)
   }, [])
 
-  const nowMs = Date.now() + offsetRef.current
   const flags = shownDate ? liveFlags(shownDate, nowMs) : null
 
   useEffect(() => {
