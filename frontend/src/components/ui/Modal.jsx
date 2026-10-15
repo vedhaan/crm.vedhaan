@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import Icon from './Icon'
 
 export default function Modal({ title, subtitle, onClose, children, footer, tabs, size = 'md' }) {
@@ -20,7 +21,7 @@ export default function Modal({ title, subtitle, onClose, children, footer, tabs
     }
   }, [])
 
-  return (
+  return createPortal(
     <div
       className='v-overlay'
       onMouseDown={(e) => {
@@ -41,6 +42,7 @@ export default function Modal({ title, subtitle, onClose, children, footer, tabs
         <div className='v-modal-body'>{children}</div>
         {footer && <div className='v-modal-foot'>{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

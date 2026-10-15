@@ -1824,3 +1824,6 @@ body {
         display: none
     }
 }
+
+.ws-dr, .ws-dr *{box-sizing:border-box}
+.ws-dr{font-family:'DM Sans',system-ui,sans-serif}

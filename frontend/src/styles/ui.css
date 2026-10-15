@@ -347,13 +347,7 @@ a {
     color: var(--brand)
 }
 
-.v-content {
-    padding: 28px 32px 56px;
-    max-width: 1400px;
-    width: 100%;
-    margin: 0 auto;
-    animation: v-fade .25s both
-}
+.v-content{padding:28px 32px 56px;max-width:1400px;width:100%;margin:0 auto;animation:v-fade .25s ease}
 
 .v-avatar {
     border-radius: 50%;

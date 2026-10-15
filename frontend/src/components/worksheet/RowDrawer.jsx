@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import API from '../../api/axios'
 import {
   MAX_FILE_MB, MAX_FILES_PER_ROW, ACCEPT, downloadWorksheetFile, fileBadge,
@@ -77,7 +78,7 @@ export default function RowDrawer({
     setSavingProof(false)
   }
 
-  return (
+  return createPortal(
     <div className='ws-dr-ov' onClick={onClose}>
       <div className='ws-dr' onClick={(e) => e.stopPropagation()}>
         <div className='ws-dr-head'>
@@ -122,7 +123,14 @@ export default function RowDrawer({
                 <div className='ws-hint' style={{ margin: '4px 0 0' }}>
                   Docs, sheets, slides, PDF, images, ZIP. Max {MAX_FILE_MB} MB each.
                 </div>
-                <input ref={inputRef} type='file' multiple accept={ACCEPT} style={{ display: 'none' }} onChange={(e) => upload(e.target.files)} />
+                <input
+                  ref={inputRef}
+                  type='file'
+                  multiple
+                  accept={ACCEPT}
+                  style={{ display: 'none' }}
+                  onChange={(e) => upload(e.target.files)}
+                />
                 {uploading !== null && (
                   <div className='ws-upbar'><i style={{ width: `${uploading}%` }} /></div>
                 )}
@@ -178,6 +186,7 @@ export default function RowDrawer({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
