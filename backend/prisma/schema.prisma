@@ -23,6 +23,8 @@ model User {
   workEntries   WorkEntry[]
   attendance    Attendance[]
   uploadedFiles TaskFile[]
+  streamId    Int?
+  stream      Stream?     @relation(fields: [streamId], references: [id], onDelete: SetNull)
 }
 
 model Client {
@@ -145,7 +147,18 @@ model WorkEntry {
   updatedAt   DateTime   @updatedAt
   isShared    Boolean    @default(false)
   files       WorkEntryFile[]
+  taskType      String?    @db.VarChar(60)
+  estHours      Float?
+  spentHours    Float?
+  isAssigned    Boolean    @default(false)
+  assignedBy    Int?
+  carryForward  Boolean    @default(false)
+  carryReason   String?    @db.VarChar(300)
+  carryCount    Int        @default(0)
+  carriedFromId Int?       @unique
 
+  carriedFrom   WorkEntry? @relation("CarryChain", fields: [carriedFromId], references: [id], onDelete: SetNull)
+  carriedTo     WorkEntry? @relation("CarryChain")
   user        User       @relation(fields: [userId], references: [id])
 
   @@index([userId, workDate])
@@ -196,6 +209,7 @@ enum WorkStatus {
 enum AttendanceStatus {
   PRESENT
   ABSENT
+  EXCUSED
 }
 
 model WorkEntryFile {
@@ -213,4 +227,15 @@ model WorkEntryFile {
   entry        WorkEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
 
   @@index([entryId])
+}
+
+model Stream {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique @db.VarChar(60)
+  countLabel   String   @default("Items") @db.VarChar(40)
+  taskTypes    String[]
+  requireProof Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  users        User[]
 }

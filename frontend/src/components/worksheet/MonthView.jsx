@@ -6,13 +6,17 @@ const kindOf = (c) => {
   if (c.marks.length === 2) return 'both'
   if (c.marks[0] === 'RED') return 'red'
   if (c.marks[0] === 'BLUE') return 'blue'
-  return { GREEN: 'green', OPEN: 'open', ABSENT: 'absent', OFF: 'off', FUTURE: 'future' }[c.status] || 'na'
+  return {
+    GREEN: 'green', CARRIED: 'carried', EXCUSED: 'excused', OPEN: 'open',
+    ABSENT: 'absent', OFF: 'off', EXEMPT: 'off', FUTURE: 'future'
+  }[c.status] || 'na'
 }
 
-const SYMBOL = { green: '✓', red: '!', blue: 'L', both: 'L!', absent: 'A' }
+const SYMBOL = { green: '✓', red: '!', blue: 'L', both: 'L!', absent: 'A', carried: 'C', excused: 'E' }
 const LABEL = {
   green: 'Complete', red: 'Unfinished', blue: 'Late plan', both: 'Late plan + Unfinished',
-  absent: 'Absent', open: 'Open', off: 'Off day', future: 'Upcoming', na: 'Not tracked'
+  absent: 'Absent', carried: 'Carried forward', excused: 'Excused', open: 'Open', off: 'Off day',
+  future: 'Upcoming', na: 'Not tracked'
 }
 
 const initials = (n) => n.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2)
@@ -24,7 +28,7 @@ const tip = (c) =>
 
 const rateOf = (u) => {
   const flagged = u.cells.filter((c) => c.marks.length > 0).length
-  const judged = u.summary.green + flagged
+  const judged = u.summary.green + flagged + (u.summary.carried || 0)
   return judged ? Math.round((u.summary.green / judged) * 100) : null
 }
 
@@ -37,11 +41,14 @@ export default function MonthView({ isAdmin, onPick }) {
   const [error, setError] = useState('')
   const [view, setView] = useState('matrix')
   const [calUser, setCalUser] = useState(null)
+  const [streamId, setStreamId] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await API.get('/worksheet/month', { params: month ? { month } : {} })
+      const r = await API.get('/worksheet/month', {
+        params: { ...(month ? { month } : {}), ...(streamId ? { streamId } : {}) }
+      })
       setData(r.data)
       setError('')
     } catch (e) {
@@ -91,6 +98,12 @@ export default function MonthView({ isAdmin, onPick }) {
             <button className={view === 'calendar' ? 'on' : ''} onClick={() => setView('calendar')}>Calendar</button>
           </div>
         )}
+        {isAdmin && data && data.streams && data.streams.length > 0 && (
+          <select className='ws-in' value={streamId} onChange={(e) => setStreamId(e.target.value)}>
+            <option value=''>All streams</option>
+            {data.streams.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
       </div>
 
       {error && <div className='ws-banner err'>{error}</div>}
@@ -118,6 +131,8 @@ export default function MonthView({ isAdmin, onPick }) {
             <span><i className='mv-lg mk-absent'>A</i>Absent</span>
             <span><i className='mv-lg mk-off' />Off day</span>
             <span><i className='mv-lg mk-na' />Not tracked</span>
+            <span><i className='mv-lg mk-carried'>C</i>Carried forward</span>
+            <span><i className='mv-lg mk-excused'>E</i>Excused</span>
           </div>
 
           {data.users.length === 0 && <div className='ws-empty'>No staff members found.</div>}

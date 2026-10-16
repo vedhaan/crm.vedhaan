@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import API from '../../api/axios'
 import { useAuth } from '../../context/AuthContext'
 import RowDrawer from './RowDrawer'
+import AssignModal from './AssignModal'
 import {
   addDays, chipsFor, countLinks, dotClasses, fmtCountdown,
   fmtDateLong, getApiError, liveFlags, progressPct
@@ -13,7 +14,7 @@ const STATUS_OPTIONS = [
   ['DONE', 'Done']
 ]
 
-function Cell({ value, type = 'text', disabled, onCommit, placeholder }) {
+function Cell({ value, type = 'text', step, disabled, onCommit, placeholder }) {
   const [draft, setDraft] = useState(String(value ?? ''))
   const focused = useRef(false)
   const cancelled = useRef(false)
@@ -44,6 +45,7 @@ function Cell({ value, type = 'text', disabled, onCommit, placeholder }) {
       className='ws-cell'
       type={type}
       min={type === 'number' ? 0 : undefined}
+      step={type === 'number' ? step : undefined}
       value={draft}
       disabled={disabled}
       placeholder={placeholder}
@@ -61,6 +63,8 @@ function Cell({ value, type = 'text', disabled, onCommit, placeholder }) {
   )
 }
 
+const EMPTY_FORM = { title: '', client: '', target: '', type: '', est: '' }
+
 export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelectedId }) {
   const { user } = useAuth()
   const [sheets, setSheets] = useState([])
@@ -69,7 +73,8 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
   const [drawerId, setDrawerId] = useState(null)
-  const [form, setForm] = useState({ title: '', client: '', target: '' })
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
   const [adding, setAdding] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const offsetRef = useRef(0)
@@ -95,15 +100,15 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
         offsetRef.current = Date.parse(r.data.serverNow) - Date.now()
         setShownDate(r.data.state.date)
         setSheets([{
-          user: r.data.user,
+          user: { ...r.data.user, stream: r.data.stream },
           attendance: r.data.attendance,
           state: r.data.state,
           entries: r.data.entries,
           holiday: r.data.holiday
         }])
       }
-      setError('')
       setNowMs(Date.now() + offsetRef.current)
+      setError('')
     } catch (e) {
       setError(getApiError(e, 'Failed to load the sheet'))
     } finally {
@@ -137,11 +142,20 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
   const st = sheet ? sheet.state : null
   const entries = sheet ? sheet.entries : []
   const ownSheet = !!sheet && sheet.user.role === 'ADMIN'
+  const isAssigning = isAdmin && !!sheet && !ownSheet
+  const stream = sheet ? sheet.user.stream : null
+  const types = stream ? stream.taskTypes : []
+
+  const streamMap = new Map()
+  sheets.forEach((s) => { if (s.user.stream) streamMap.set(s.user.stream.id, s.user.stream) })
+  const allStreams = [...streamMap.values()]
+  const allTypes = [...new Set(allStreams.flatMap((s) => s.taskTypes))]
 
   const staffCanWrite = !isAdmin && !!st && st.canStaffWrite && !!flags && !flags.closed
   const canWrite = isAdmin || staffCanWrite
   const planEditable = isAdmin || (staffCanWrite && !flags.planFrozen)
   const execEditable = canWrite
+  const rowPlanEditable = (e) => isAdmin || (planEditable && !e.isAssigned && !e.carriedFromId)
 
   const canDeleteFile = (f) => {
     if (isAdmin) return true
@@ -157,9 +171,11 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
     ))
   }
 
+  // field can be a field name (with value) or an object of several fields
   const patch = async (entry, field, value) => {
+    const payload = typeof field === 'string' ? { [field]: value } : field
     try {
-      const r = await API.patch(`/worksheet/entries/${entry.id}`, { [field]: value })
+      const r = await API.patch(`/worksheet/entries/${entry.id}`, payload)
       replaceEntry(r.data.entry)
       load()
       return true
@@ -189,14 +205,16 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
       const body = {
         title: form.title,
         client: form.client,
-        targetCount: form.target === '' ? null : Number(form.target)
+        taskType: form.type,
+        targetCount: form.target === '' ? null : Number(form.target),
+        estHours: form.est === '' ? null : Number(form.est)
       }
       if (isAdmin) {
         body.userId = sheet.user.id
         body.date = shownDate
       }
       await API.post('/worksheet/entries', body)
-      setForm({ title: '', client: '', target: '' })
+      setForm(EMPTY_FORM)
       await load()
     } catch (e) {
       flash('error', getApiError(e, 'Could not add the row'))
@@ -227,15 +245,17 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
     if (!isAdmin || !st) return null
     if (ownSheet) return 'This is your own sheet. It has no time locks and is not marked red or blue. Use the file panel to share rows with staff.'
     if (st.status === 'ABSENT') return 'Marked absent. Staff cannot edit this day. Admin edits are still allowed.'
+    if (st.status === 'EXCUSED') return 'Day excused: no red or blue marks for this person.'
     if (st.status === 'OFF') return sheet.holiday ? `Holiday: ${sheet.holiday.name}.` : 'Weekly off.'
     return null
   }
-  
+
   const chips = st ? chipsFor(st) : []
   const att = sheet && sheet.attendance ? sheet.attendance.status : null
-  const doneCount = entries.filter((e) => e.status === 'DONE').length
+  const doneRows = entries.filter((e) => e.status === 'DONE').length
   const totalLinks = entries.reduce((n, e) => n + countLinks(e.proof), 0)
   const totalFiles = entries.reduce((n, e) => n + e.files.length, 0)
+  const spentH = Math.round(entries.reduce((n, e) => n + (e.spentHours || 0), 0) * 100) / 100
 
   let countdown = null
   if (flags && st && !ownSheet && flags.isToday && st.working && !flags.closed) {
@@ -245,6 +265,8 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
 
   const message = lockedText() || adminInfo()
   const drawerEntry = entries.find((e) => e.id === drawerId) || null
+
+  const typeOptions = (e) => (e.taskType && !types.includes(e.taskType) ? [...types, e.taskType] : types)
 
   return (
     <div>
@@ -258,6 +280,9 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
           <button className='ws-btn' onClick={() => setDate('')}>Today</button>
         </div>
         <div className='ws-statusbar'>
+          {isAdmin && (
+            <button className='ws-btn primary' onClick={() => setAssignOpen(true)}>Assign work</button>
+          )}
           {countdown && <span className={`ws-countdown ${countdown.urgent ? 'urgent' : ''}`}>{countdown.text}</span>}
           {chips.map((c, i) => <span key={i} className={`ws-chip ${c.cls}`}>{c.label}</span>)}
         </div>
@@ -277,9 +302,14 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
                 {dotClasses(s.state).map((c, i) => <i key={i} className={`ws-dot ${c}`} />)}
               </span>
               {s.user.name}{s.user.role === 'ADMIN' ? ' (Admin)' : ''}
+              {s.user.stream && <span className='ws-streamtag'>{s.user.stream.name}</span>}
             </button>
           ))}
         </div>
+      )}
+
+      {sheet && !isAdmin && stream && (
+        <div className='ws-hint' style={{ marginBottom: 10 }}>Your stream: <b>{stream.name}</b></div>
       )}
 
       {isAdmin && sheet && !ownSheet && (
@@ -287,6 +317,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
           <span className='ws-att-label'>Attendance for {sheet.user.name}:</span>
           <button className={`ws-btn small ${att === 'ABSENT' ? 'amber' : ''}`} onClick={() => setAttendance('ABSENT')}>Absent</button>
           <button className={`ws-btn small ${att === 'PRESENT' ? 'green' : ''}`} onClick={() => setAttendance('PRESENT')}>Present</button>
+          <button className={`ws-btn small ${att === 'EXCUSED' ? 'violet' : ''}`} onClick={() => setAttendance('EXCUSED')} title='Present, but red and blue marks are cleared'>Excuse day</button>
           {att && <button className='ws-btn small' onClick={() => setAttendance(null)}>Clear</button>}
         </div>
       )}
@@ -294,7 +325,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
       {message && <div className='ws-banner'>{message}</div>}
       {!isAdmin && staffCanWrite && flags.planFrozen && (
         <div className='ws-banner warn'>
-          The 11:45 AM plan deadline has passed. New rows are marked LATE, and Task, Client and Target are frozen.
+          The 11:45 AM plan deadline has passed. New rows are marked LATE, and Task, Type, Client, Target and Estimate are frozen.
         </div>
       )}
       {error && <div className='ws-banner err'>{error}</div>}
@@ -307,7 +338,8 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
         <>
           <div className='ws-summary'>
             <span><b>{entries.length}</b> rows</span>
-            <span><b>{doneCount}</b> done</span>
+            <span><b>{doneRows}</b> done</span>
+            <span><b>{spentH}</b> hours</span>
             <span><b>{totalFiles}</b> files</span>
             <span><b>{totalLinks}</b> proof links</span>
           </div>
@@ -318,9 +350,12 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
                 <tr>
                   <th className='w-idx'>#</th>
                   <th className='w-task'>Task</th>
+                  <th className='w-type'>Type</th>
                   <th className='w-client'>Client / Project</th>
                   <th className='w-num'>Target</th>
                   <th className='w-num'>Done</th>
+                  <th className='w-hrs'>Est h</th>
+                  <th className='w-hrs'>Spent h</th>
                   <th className='w-status'>Status</th>
                   <th className='w-rem'>Remarks</th>
                   <th className='w-proof'>Files</th>
@@ -329,24 +364,41 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
               </thead>
               <tbody>
                 {entries.length === 0 && (
-                  <tr className='ws-emptyrow'><td colSpan={9} className='ws-norows'>No work added for this day.</td></tr>
+                  <tr className='ws-emptyrow'><td colSpan={12} className='ws-norows'>No work added for this day.</td></tr>
                 )}
                 {entries.map((e, i) => {
                   const links = countLinks(e.proof)
                   const fc = e.files.length
+                  const rowPlan = rowPlanEditable(e)
                   const label = fc || links
                     ? [fc ? `${fc} file${fc !== 1 ? 's' : ''}` : '', links ? `${links} link${links !== 1 ? 's' : ''}` : ''].filter(Boolean).join(' + ')
                     : (canWrite ? 'Add' : '-')
                   return (
                     <tr key={e.id} className={`ws-tr ${e.status.toLowerCase()}`}>
                       <td className='ws-idx' data-label='#'>
-                        {i + 1}
-                        {e.isLate && <span className='ws-late' title='Added after 11:45 AM'>LATE</span>}
-                        {e.isShared && <span className='ws-shared' title='Visible to staff'>SHARED</span>}
+                        <div>{i + 1}</div>
+                        <div className='ws-badges'>
+                          {e.isLate && <span className='ws-late' title='Added after 11:45 AM'>LATE</span>}
+                          {e.isAssigned && <span className='ws-assigned' title='Assigned by admin'>ASSIGNED</span>}
+                          {e.carriedFromId && <span className='ws-carried' title='Carried forward from an earlier day'>CARRIED</span>}
+                          {e.carryForward && <span className='ws-carry-flag' title={e.carryReason || ''}>CARRY</span>}
+                          {e.isShared && <span className='ws-shared' title='Visible to staff'>SHARED</span>}
+                        </div>
                       </td>
-                      <td data-label='Task'><Cell value={e.title} disabled={!planEditable} onCommit={(v) => patch(e, 'title', v)} /></td>
-                      <td data-label='Client'><Cell value={e.client || ''} disabled={!planEditable} onCommit={(v) => patch(e, 'client', v)} /></td>
-                      <td data-label='Target'><Cell type='number' value={e.targetCount ?? ''} disabled={!planEditable} onCommit={(v) => patch(e, 'targetCount', v)} /></td>
+                      <td data-label='Task'><Cell value={e.title} disabled={!rowPlan} onCommit={(v) => patch(e, 'title', v)} /></td>
+                      <td data-label='Type'>
+                        <select
+                          className='ws-typesel'
+                          value={e.taskType || ''}
+                          disabled={!rowPlan}
+                          onChange={(ev) => patch(e, 'taskType', ev.target.value)}
+                        >
+                          <option value=''>-</option>
+                          {typeOptions(e).map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </td>
+                      <td data-label='Client'><Cell value={e.client || ''} disabled={!rowPlan} onCommit={(v) => patch(e, 'client', v)} /></td>
+                      <td data-label='Target'><Cell type='number' value={e.targetCount ?? ''} disabled={!rowPlan} onCommit={(v) => patch(e, 'targetCount', v)} /></td>
                       <td data-label='Done'>
                         <div className='ws-donecell'>
                           <Cell type='number' value={e.doneCount} disabled={!execEditable} onCommit={(v) => patch(e, 'doneCount', v)} />
@@ -355,6 +407,8 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
                           ) : null}
                         </div>
                       </td>
+                      <td data-label='Est h'><Cell type='number' step='0.25' value={e.estHours ?? ''} disabled={!rowPlan} onCommit={(v) => patch(e, 'estHours', v)} /></td>
+                      <td data-label='Spent h'><Cell type='number' step='0.25' value={e.spentHours ?? ''} disabled={!execEditable} onCommit={(v) => patch(e, 'spentHours', v)} /></td>
                       <td data-label='Status'>
                         <select
                           className={`ws-select ${e.status.toLowerCase()}`}
@@ -370,7 +424,7 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
                         <button className={`ws-proof ${fc || links ? 'has' : ''}`} onClick={() => setDrawerId(e.id)}>{label}</button>
                       </td>
                       <td data-label=''>
-                        {planEditable && <button className='ws-del' onClick={() => removeRow(e)}>Delete</button>}
+                        {rowPlan && <button className='ws-del' onClick={() => removeRow(e)}>Delete</button>}
                       </td>
                     </tr>
                   )
@@ -381,11 +435,53 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
 
           {canWrite && (
             <form className='ws-add' onSubmit={addRow}>
-              <input className='ws-in grow' placeholder='New task, e.g. Create 50 backlinks' value={form.title} maxLength={300} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              <input
+                className='ws-in grow'
+                placeholder={isAssigning ? `Assign work to ${sheet.user.name}` : 'New task, e.g. Create 50 backlinks'}
+                value={form.title}
+                maxLength={300}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+              {isAdmin ? (
+                <>
+                  <input
+                    className='ws-in'
+                    list='ws-all-types'
+                    placeholder='Type'
+                    value={form.type}
+                    maxLength={60}
+                    onChange={(e) => setForm({ ...form, type: e.target.value })}
+                  />
+                  <datalist id='ws-all-types'>
+                    {allTypes.map((t) => <option key={t} value={t} />)}
+                  </datalist>
+                </>
+              ) : types.length > 0 ? (
+                <select className='ws-in' value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  <option value=''>Type</option>
+                  {types.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              ) : null}
               <input className='ws-in' placeholder='Client / Project' value={form.client} maxLength={150} onChange={(e) => setForm({ ...form, client: e.target.value })} />
-              <input className='ws-in narrow' type='number' min='1' placeholder='Target' value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} />
+              <input
+                className='ws-in narrow'
+                type='number'
+                min='1'
+                placeholder={stream ? stream.countLabel : 'Target'}
+                value={form.target}
+                onChange={(e) => setForm({ ...form, target: e.target.value })}
+              />
+              <input
+                className='ws-in narrow'
+                type='number'
+                min='0'
+                step='0.25'
+                placeholder='Est. h'
+                value={form.est}
+                onChange={(e) => setForm({ ...form, est: e.target.value })}
+              />
               <button type='submit' className='ws-btn primary' disabled={adding || !form.title.trim()}>
-                {adding ? 'Adding...' : 'Add row'}
+                {adding ? 'Saving...' : isAssigning ? 'Assign' : 'Add row'}
               </button>
             </form>
           )}
@@ -400,10 +496,23 @@ export default function DaySheet({ isAdmin, date, setDate, selectedId, setSelect
           ownerIsAdmin={ownSheet}
           canUpload={canWrite}
           canEditProof={execEditable}
+          canEditExec={execEditable}
           canDeleteFile={canDeleteFile}
           onPatch={patch}
           onChanged={load}
           onClose={() => setDrawerId(null)}
+          flash={flash}
+        />
+      )}
+
+      {assignOpen && (
+        <AssignModal
+          staff={sheets.filter((s) => s.user.role === 'MEMBER')}
+          streams={allStreams}
+          defaultDate={shownDate}
+          defaultUserId={sheet && sheet.user.role === 'MEMBER' ? sheet.user.id : null}
+          onClose={() => setAssignOpen(false)}
+          onDone={() => { setAssignOpen(false); load() }}
           flash={flash}
         />
       )}

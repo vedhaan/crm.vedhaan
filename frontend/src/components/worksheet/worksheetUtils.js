@@ -83,6 +83,8 @@ export const STATUS_META = {
   FUTURE: { label: 'Upcoming', cls: 'grey' },
   NA: { label: 'Not joined', cls: 'grey' },
   EXEMPT: { label: 'Admin sheet', cls: 'grey' },
+  EXCUSED: { label: 'Excused', cls: 'violet' },
+  CARRIED: { label: 'Carried forward', cls: 'teal' },
 }
 
 export const chipsFor = (state) =>
@@ -131,4 +133,19 @@ export const progressPct = (e) =>
 export const downloadWorksheetFile = async (id) => {
   const r = await API.get(`/worksheet/files/${id}/download`)
   window.location.assign(r.data.url)
+}
+
+export const MAX_CARRIES = 3
+
+const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+
+export const downloadCsv = (filename, rows) => {
+  const text = rows.map((r) => r.map(csvCell).join(',')).join('\n')
+  const blob = new Blob([`\ufeff${text}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }

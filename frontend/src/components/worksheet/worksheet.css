@@ -1827,3 +1827,28 @@ body {
 
 .ws-dr, .ws-dr *{box-sizing:border-box}
 .ws-dr{font-family:'DM Sans',system-ui,sans-serif}
+
+/* Streams, assignment, carry forward */
+.ws-table{min-width:1360px}
+.ws-table .w-idx{width:104px}
+.ws-table .w-type{width:132px}
+.ws-table .w-hrs{width:78px}
+.ws-badges{display:flex;gap:3px;flex-wrap:wrap;margin-top:3px}
+.ws-badges span{margin-left:0}
+.ws-typesel{width:100%;padding:6px 6px;border:1px solid transparent;border-radius:6px;background:transparent;font-size:12px;cursor:pointer;outline:none}
+.ws-typesel:hover:not(:disabled){border-color:#e5e7eb}
+.ws-typesel:focus{border-color:#b14b90;background:#fff}
+.ws-typesel:disabled{color:#6b7280;cursor:default;appearance:none;-webkit-appearance:none}
+.ws-assigned{font-size:9px;font-weight:700;color:#7c3aed;background:#FAF5FF;border:1px solid #DDD6FE;border-radius:4px;padding:1px 5px}
+.ws-carried{font-size:9px;font-weight:700;color:#0E7490;background:#ECFEFF;border:1px solid #A5F3FC;border-radius:4px;padding:1px 5px}
+.ws-carry-flag{font-size:9px;font-weight:700;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:4px;padding:1px 5px}
+.ws-streamtag{font-size:10px;font-weight:600;color:#888;background:#f4f4f5;border-radius:99px;padding:1px 7px}
+.ws-pill.on .ws-streamtag{background:rgba(255,255,255,.15);color:#ddd}
+.ws-btn.violet{background:#F5F3FF;border-color:#A78BFA;color:#6D28D9}
+.ws-chip.teal{background:#ECFEFF;color:#0E7490;border-color:#A5F3FC}
+.ws-chip.violet{background:#F5F3FF;color:#6D28D9;border-color:#DDD6FE}
+.ws-dot.teal{background:#06B6D4}
+.ws-dot.violet{background:#8B5CF6}
+.ws-h2{font-family:'Sora',sans-serif;font-size:14px;font-weight:700;margin:6px 0 10px}
+.mk-carried{background:#ECFEFF;color:#0E7490;border-color:#A5F3FC}
+.mk-excused{background:#F5F3FF;color:#6D28D9;border-color:#DDD6FE}

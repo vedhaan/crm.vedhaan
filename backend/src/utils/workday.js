@@ -1,5 +1,4 @@
-// All worksheet rules live here. IST is a fixed UTC+5:30 offset (no DST),
-// so plain arithmetic is safe and needs no library.
+// All worksheet rules live here. IST is a fixed UTC+5:30 offset (no DST).
 
 const IST_OFFSET_MS = 330 * 60 * 1000
 const PLAN_DEADLINE_MIN = 11 * 60 + 45 // 11:45 AM
@@ -24,7 +23,6 @@ const judgedFrom = (createdAt) => {
   return START_DATE && START_DATE > joined ? START_DATE : joined
 }
 
-// Date column values come back from Prisma as UTC midnight
 const toDateStr = (d) => d.toISOString().slice(0, 10)
 
 const parseDateStr = (str) => {
@@ -44,9 +42,8 @@ const monthDates = (monthStr) => {
 
 /**
  * Single source of truth for one person on one date.
- * entries: [{ status, isLate }]
- * attendance: 'PRESENT' | 'ABSENT' | null
- * joinedStr: IST date the account was created (earlier days are not judged)
+ * entries: [{ status, isLate, carryForward }]
+ * attendance: 'PRESENT' | 'ABSENT' | 'EXCUSED' | null
  */
 const computeDay = ({ dateStr, entries = [], attendance = null, isHoliday = false, joinedStr = null, exempt = false, now = istNow() }) => {
   const isToday = dateStr === now.dateStr
@@ -55,7 +52,10 @@ const computeDay = ({ dateStr, entries = [], attendance = null, isHoliday = fals
   const planFrozen = dateStr < now.dateStr || (isToday && now.minutes >= PLAN_DEADLINE_MIN)
   const isOffDay = isSunday(dateStr) || isHoliday
   const beforeJoin = !!joinedStr && dateStr < joinedStr
-  const working = !beforeJoin && attendance !== 'ABSENT' && (attendance === 'PRESENT' || !isOffDay)
+  const working =
+    !beforeJoin &&
+    attendance !== 'ABSENT' &&
+    (attendance === 'PRESENT' || attendance === 'EXCUSED' || !isOffDay)
 
   let status
   let marks = []
@@ -65,13 +65,20 @@ const computeDay = ({ dateStr, entries = [], attendance = null, isHoliday = fals
   else if (attendance === 'ABSENT') status = 'ABSENT'
   else if (!working) status = 'OFF'
   else if (isFuture) status = 'FUTURE'
+  else if (attendance === 'EXCUSED') status = 'EXCUSED'
   else {
+    // Any on-time row counts as a plan: own, admin-assigned or carried forward
     const onTimeRows = entries.filter((e) => !e.isLate).length
     const blue = planFrozen && onTimeRows === 0
-    const red = closed && (entries.length === 0 || entries.some((e) => e.status !== 'DONE'))
+    // Rows carried forward with a reason do not count as unfinished
+    const red = closed && (entries.length === 0 || entries.some((e) => e.status !== 'DONE' && !e.carryForward))
     if (blue) marks.push('BLUE')
     if (red) marks.push('RED')
-    status = marks.length ? 'FLAGGED' : closed ? 'GREEN' : 'OPEN'
+    status = marks.length
+      ? 'FLAGGED'
+      : closed
+        ? (entries.some((e) => e.carryForward) ? 'CARRIED' : 'GREEN')
+        : 'OPEN'
   }
 
   const canStaffWrite = working && isToday && !closed
@@ -109,10 +116,10 @@ module.exports = {
   PLAN_DEADLINE_MIN,
   LOCK_MIN,
   istNow,
+  judgedFrom,
   toDateStr,
   parseDateStr,
   isSunday,
   monthDates,
-  computeDay,
-  judgedFrom
+  computeDay
 }

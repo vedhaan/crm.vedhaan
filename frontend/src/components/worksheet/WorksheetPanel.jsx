@@ -4,6 +4,8 @@ import MonthView from './MonthView'
 import HolidayManager from './HolidayManager'
 import Dashboard from './Dashboard'
 import SharedByAdmin from './SharedByAdmin'
+import Reports from './Reports'
+import StreamsManager from './StreamsManager'
 import WorksheetBoundary from './WorksheetBoundary'
 import './worksheet.css'
 
@@ -19,7 +21,10 @@ export default function WorksheetPanel({ isAdmin }) {
   }
 
   const tabs = isAdmin
-    ? [['dashboard', 'Dashboard'], ['day', 'Day Sheet'], ['month', 'Month Overview'], ['holidays', 'Holidays']]
+    ? [
+        ['dashboard', 'Dashboard'], ['day', 'Day Sheet'], ['month', 'Month Overview'],
+        ['reports', 'Reports'], ['streams', 'Streams'], ['holidays', 'Holidays']
+      ]
     : [['day', 'My Sheet'], ['shared', 'Shared by Admin'], ['month', 'My Month']]
 
   return (
@@ -29,13 +34,16 @@ export default function WorksheetPanel({ isAdmin }) {
           <button key={key} className={`ws-tab ${tab === key ? 'on' : ''}`} onClick={() => setTab(key)}>{label}</button>
         ))}
       </div>
-      <WorksheetBoundary>
+
+      <WorksheetBoundary key={tab}>
         {tab === 'dashboard' && isAdmin && <Dashboard onOpen={openDay} />}
         {tab === 'day' && (
           <DaySheet isAdmin={isAdmin} date={date} setDate={setDate} selectedId={selectedId} setSelectedId={setSelectedId} />
         )}
         {tab === 'shared' && !isAdmin && <SharedByAdmin />}
         {tab === 'month' && <MonthView isAdmin={isAdmin} onPick={openDay} />}
+        {tab === 'reports' && isAdmin && <Reports />}
+        {tab === 'streams' && isAdmin && <StreamsManager />}
         {tab === 'holidays' && isAdmin && <HolidayManager />}
       </WorksheetBoundary>
     </div>

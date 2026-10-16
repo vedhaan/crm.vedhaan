@@ -2,22 +2,26 @@ import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import API from '../../api/axios'
 import {
-  MAX_FILE_MB, MAX_FILES_PER_ROW, ACCEPT, downloadWorksheetFile, fileBadge,
+  MAX_CARRIES, MAX_FILE_MB, MAX_FILES_PER_ROW, ACCEPT, downloadWorksheetFile, fileBadge,
   formatBytes, getApiError, isAllowedFile, proofLinks
 } from './worksheetUtils'
 
 export default function RowDrawer({
-  entry, isAdmin, ownerIsAdmin, canUpload, canEditProof, canDeleteFile,
+  entry, isAdmin, ownerIsAdmin, canUpload, canEditProof, canEditExec, canDeleteFile,
   onPatch, onChanged, onClose, flash
 }) {
   const [proof, setProof] = useState(entry.proof || '')
   const [savingProof, setSavingProof] = useState(false)
+  const [reason, setReason] = useState(entry.carryReason || '')
+  const [carrying, setCarrying] = useState(false)
   const [uploading, setUploading] = useState(null)
   const [dragOver, setDragOver] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const inputRef = useRef(null)
   const links = proofLinks(proof)
   const proofDirty = proof.trim() !== (entry.proof || '')
+  const canCarry = canEditExec && entry.status !== 'DONE'
+  const carriesLeft = MAX_CARRIES - (entry.carryCount || 0)
 
   const upload = async (list) => {
     const files = Array.from(list || [])
@@ -78,6 +82,13 @@ export default function RowDrawer({
     setSavingProof(false)
   }
 
+  const carry = async (on) => {
+    setCarrying(true)
+    const ok = await onPatch(entry, on ? { carryForward: true, carryReason: reason } : { carryForward: false })
+    setCarrying(false)
+    if (ok && !on) setReason('')
+  }
+
   return createPortal(
     <div className='ws-dr-ov' onClick={onClose}>
       <div className='ws-dr' onClick={(e) => e.stopPropagation()}>
@@ -85,13 +96,20 @@ export default function RowDrawer({
           <div>
             <div className='ws-dr-title'>{entry.title}</div>
             <div className='ws-dr-sub'>
-              {entry.client || 'No client'} · {entry.doneCount}/{entry.targetCount ?? '-'} done
+              {entry.taskType ? `${entry.taskType} · ` : ''}{entry.client || 'No client'} · {entry.doneCount}/{entry.targetCount ?? '-'} done
             </div>
           </div>
           <button className='ws-x' onClick={onClose}>×</button>
         </div>
 
         <div className='ws-dr-body'>
+          {(entry.isAssigned || entry.carriedFromId) && (
+            <div className='ws-banner'>
+              {entry.isAssigned && 'Assigned by admin. '}
+              {entry.carriedFromId && `Carried forward from an earlier day (carry ${entry.carryCount} of ${MAX_CARRIES}).`}
+            </div>
+          )}
+
           {isAdmin && ownerIsAdmin && (
             <div className='ws-sec'>
               <label className='ws-switch'>
@@ -184,6 +202,48 @@ export default function RowDrawer({
               </div>
             )}
           </div>
+
+          {(entry.carryForward || canCarry) && (
+            <div className='ws-sec'>
+              <div className='ws-sec-t'>
+                <span>Carry forward</span>
+                <span>{entry.carryCount || 0}/{MAX_CARRIES} used</span>
+              </div>
+              {entry.carryForward ? (
+                <>
+                  <div className='ws-banner'>
+                    Marked to carry forward to the next working day. Reason: {entry.carryReason}
+                  </div>
+                  {canEditExec && (
+                    <button className='ws-btn' disabled={carrying} onClick={() => carry(false)}>Undo carry forward</button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <textarea
+                    className='ws-textarea'
+                    style={{ minHeight: 70 }}
+                    maxLength={300}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder='Why could this not be finished today?'
+                  />
+                  {carriesLeft <= 0 && (
+                    <div className='ws-hint'>This work was already carried forward {MAX_CARRIES} times. Finish it or ask admin.</div>
+                  )}
+                  <div className='ws-modal-actions'>
+                    <button
+                      className='ws-btn'
+                      disabled={carrying || reason.trim().length < 3 || carriesLeft <= 0}
+                      onClick={() => carry(true)}
+                    >
+                      {carrying ? 'Saving...' : 'Carry forward to next day'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>,
